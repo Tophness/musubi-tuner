@@ -23,14 +23,14 @@ This feature is experimental.
 
 You need to download the DiT, VAE, and Text Encoder (Qwen3) models. 
 
-Since the base model has not been released, it is recommended to use AI Toolkit/ostris's De-Turbo model. Download `z_image_de_turbo_v1_bf16.safetensors` from [ostris/Z-Image-De-Turbo](https://huggingface.co/ostris/Z-Image-De-Turbo) and use it as the DiT model.
+*As of January 2026, the base model has been released. VAE and Text Encoder are the same as the Turbo model, so if you have already downloaded them, there is no need to download them again.*
 
-The Turbo version DiT, VAE, and Text Encoder can be obtained from Tongyi-MAI's official repository or ComfyUI weights. You can use either of the following:
+The base version DiT, VAE, and Text Encoder can be obtained from Tongyi-MAI's official repository or ComfyUI weights. You can use either of the following:
 
-- **Official Repository**: [Tongyi-MAI/Z-Image-Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/)
-    - For DiT and Text Encoder, download all the split files and specify the first file (e.g., `00001-of-00004.safetensors`) in the arguments.
+- **Official Repository**: [Tongyi-MAI/Z-Image](https://huggingface.co/Tongyi-MAI/Z-Image/)
+    - For DiT and Text Encoder, download all the split files and specify the first file (e.g., `00001-of-00002.safetensors`) in the arguments.
     - You do not need to download files other than `*.safetensors`.
-- **ComfyUI Weights**: [Comfy-Org/z_image_turbo](https://huggingface.co/Comfy-Org/z_image_turbo)
+- **ComfyUI Weights**: [Comfy-Org/z_image](https://huggingface.co/Comfy-Org/z_image)
 
 You need to prepare the following models:
 
@@ -38,23 +38,27 @@ You need to prepare the following models:
 - **VAE**: The autoencoder model.
 - **Text Encoder**: Qwen3 model.
 
-As another option, you can also use ostris's [ostris/zimage_turbo_training_adapter](https://huggingface.co/ostris/zimage_turbo_training_adapter) to train by combining the Turbo version with an adapter. In this case, download `zimage_turbo_training_adapter_v2.safetensors`, etc., and specify this LoRA weight in the `--base_weights` option during training.
+*The following information is prior to the base model release. Since the base model has been released, it is recommended to use the base model for training.*
 
-We would like to express our deep gratitude to ostris for providing the De-Turbo model and Training Adapter.
+> If you train Turbo model, it is recommended to use AI Toolkit/ostris's De-Turbo model. Download `z_image_de_turbo_v1_bf16.safetensors` from [ostris/Z-Image-De-Turbo](https://huggingface.co/ostris/Z-Image-De-Turbo) and use it as the DiT model.
+> 
+> As another option, you can also use ostris's [ostris/zimage_turbo_training_adapter](https://huggingface.co/ostris/zimage_turbo_training_adapter) to train by combining the Turbo version with an adapter. In this case, download `zimage_turbo_training_adapter_v2.safetensors`, etc., and specify this LoRA weight in the `--base_weights` option during training.
+> 
+> We would like to express our deep gratitude to ostris for providing the De-Turbo model and Training Adapter.
 
 <details>
 <summary>日本語</summary>
 
 DiT, VAE, Text Encoder (Qwen3) のモデルをダウンロードする必要があります。
 
-Baseモデルがリリースされていないため、AI Toolkit/ostris氏のDe-Turboモデルを使用することをお勧めします。[ostris/Z-Image-De-Turbo](https://huggingface.co/ostris/Z-Image-De-Turbo) から `z_image_de_turbo_v1_bf16.safetensors` をダウンロードし、DiTモデルとして使用してください。
+*※2026/1：Baseモデルがリリースされました。VAEとText EncoderはTurboモデルと同じですので、ダウンロード済みの場合は再ダウンロードの必要はありません。*
 
-Turbo版のDiT、VAEとText EncoderはTongyi-MAIの公式リポジトリまたはComfyUI用重みから取得できます。以下のいずれかを使用してください：
+Base版のDiT、VAEとText EncoderはTongyi-MAIの公式リポジトリまたはComfyUI用重みから取得できます。以下のいずれかを使用してください：
 
-- **公式リポジトリ**: [Tongyi-MAI/Z-Image-Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/)
-    - DiT、Text Encoderは、分割された複数のファイルをすべてダウンロードし、引数には `00001-of-00004.safetensors` のような最初のファイルを指定してください。
+- **公式リポジトリ**: [Tongyi-MAI/Z-Image](https://huggingface.co/Tongyi-MAI/Z-Image/)
+    - DiT、Text Encoderは、分割された複数のファイルをすべてダウンロードし、引数には `00001-of-00002.safetensors` のような最初のファイルを指定してください。
     - `*.safetensors` ファイル以外はダウンロードする必要はありません。
-- **ComfyUI用重み**: [Comfy-Org/z_image_turbo](https://huggingface.co/Comfy-Org/z_image_turbo)
+- **ComfyUI用重み**: [Comfy-Org/z_image](https://huggingface.co/Comfy-Org/z_image)
 
 以下のモデルを準備してください：
 
@@ -62,9 +66,13 @@ Turbo版のDiT、VAEとText EncoderはTongyi-MAIの公式リポジトリまた�
 - **VAE**: Autoencoderモデル。
 - **Text Encoder**: Qwen3モデル。
 
-別のオプションとして、ostris氏の [ostris/zimage_turbo_training_adapter](https://huggingface.co/ostris/zimage_turbo_training_adapter) を使用して、Turbo版とAdapterを組み合わせて学習することもできます。この場合は、`zimage_turbo_training_adapter_v2.safetensors` 等をダウンロードし、学習時に `--base_weights` オプションにこのLoRA重みを指定してください。
+*以下はBaseモデルリリース前の情報です。Baseモデルがリリースされたため、学習にはBaseモデルの使用をお勧めします。*
 
-De-TurboモデルおよびTraining Adapterを提供してくださった ostris 氏に深く感謝します。
+> Turboモデルの学習を行う場合は、AI Toolkit/ostris氏のDe-Turboモデルを使用することをお勧めします。[ostris/Z-Image-De-Turbo](https://huggingface.co/ostris/Z-Image-De-Turbo) から `z_image_de_turbo_v1_bf16.safetensors` をダウンロードし、DiTモデルとして使用してください。
+> 
+> 別のオプションとして、ostris氏の [ostris/zimage_turbo_training_adapter](https://huggingface.co/ostris/zimage_turbo_training_adapter) を使用して、Turbo版とAdapterを組み合わせて学習することもできます。この場合は、`zimage_turbo_training_adapter_v2.safetensors` 等をダウンロードし、学習時に `--base_weights` オプションにこのLoRA重みを指定してください。
+> 
+> De-TurboモデルおよびTraining Adapterを提供してくださった ostris 氏に深く感謝します。
 
 </details>
 
@@ -167,28 +175,35 @@ Z-Imageの学習は専用のスクリプト`zimage_train_network.py`を使用し
 
 </details>
 
-### Converting LoRA weights to ComfyUI format / LoRA重みをComfyUI形式に変換する
+### Converting LoRA weights to Diffusers format for ComfyUI / LoRA重みをComfyUIで使用可能なDiffusers形式に変換する
 
-A script is provided to convert Z-Image LoRA weights to ComfyUI format.
+A script is provided to convert Z-Image LoRA weights to Diffusers format for ComfyUI. LoHa and LoKr formats are supported.
 
 ```bash
-python src/musubi_tuner/networks/convert_z_image_lora_to_comfy.py \
-    path/to/zimage_lora.safetensors \
-    path/to/output_comfy_lora.safetensors
+python src/musubi_tuner/networks/convert_lora.py \
+    --input path/to/zimage_lora.safetensors \
+    --output path/to/output_diffusers_lora.safetensors \
+    --target other
 ```
 
-- The script is `convert_z_image_lora_to_comfy.py`.
-- The first argument is the input Z-Image LoRA weights file.
-- The second argument is the output ComfyUI-format LoRA weights file.
+- The script is `convert_lora.py`.
+- `--input` argument is the input Z-Image LoRA weights file.
+- `--output` argument is the output Diffusers format LoRA weights file.
+- `--target other` means Diffusers format can be used in ComfyUI.
+
+`networks\convert_z_image_lora_to_comfy.py` can also be used for this purpose, but the converted weights may not work correctly with nunchaku.
 
 <details>
 <summary>日本語</summary>
 
-Z-ImageのLoRA重みをComfyUI形式に変換するスクリプトが提供されています。
+Z-ImageのLoRA重みをComfyUIで使用できるDiffusers形式に変換するスクリプトが提供されています。
 
-- スクリプトは`convert_z_image_lora_to_comfy.py`です。
-- 最初の引数は入力のZ-Image LoRA重みファイルです。
-- 2番目の引数は出力のComfyUI形式のLoRA重みファイルです。
+- スクリプトは`convert_lora.py`です。
+- `--input`引数は入力のZ-Image LoRA重みファイルです。
+- `--output`引数は出力のDiffusers形式のLoRA重みファイルです。
+- `--target other`はComfyUIで使用できるDiffusers形式を意味します。
+
+`networks\convert_z_image_lora_to_comfy.py`もこの目的で使用できますが、変換された重みがnunchakuで正しく動作しない可能性があります。
 
 </details>
 
@@ -230,19 +245,19 @@ Z-ImageのLoRA重みをComfyUI形式に変換するスクリプトが提供さ�
 
 ### Sample images during training with De-Turbo model or Training Adapter / De-TurboモデルまたはTraining Adapterで学習中にサンプル画像を生成する
 
-When training with the De-Turbo model or Training Adapter, add negative prompt and CFG scale to the sampling options to generate sample images with CFG. It is also recommended to increase the number of steps. `--l` specifies the CFG scale.
+When training with the De-Turbo model or Training Adapter, add negative prompt and CFG scale to the sampling options to generate sample images with CFG. It is also recommended to increase the number of steps. `--l` specifies the CFG scale (default 4).
 
 ```text
-A beautiful landscape painting of mountains during sunset.  --n bad quality --w 1280 --h 720 --fs 3 --s 20 --d 1234 --l 5
+A beautiful landscape painting of mountains during sunset.  --n bad quality --w 1280 --h 720 --fs 3 --s 20 --d 1234 --l 4
 ```
 
 <details>
 <summary>日本語</summary>
  
- De-TurboモデルまたはTraining Adapterで学習する場合、サンプリングオプションにネガティブプロンプトとCFGスケールを追加して、CFGありでサンプル画像を生成してください。またステップ数も増やすことをお勧めします。`--l`でCFGスケールを指定します。
+ De-TurboモデルまたはTraining Adapterで学習する場合、サンプリングオプションにネガティブプロンプトとCFGスケールを追加して、CFGありでサンプル画像を生成してください。またステップ数も増やすことをお勧めします。`--l`でCFGスケールを指定します（デフォルトは4です）。
  
  ```text
-A beautiful landscape painting of mountains during sunset.  --n bad quality --w 1280 --h 720 --fs 3 --s 20 --d 1234 --l 5
+A beautiful landscape painting of mountains during sunset.  --n bad quality --w 1280 --h 720 --fs 3 --s 20 --d 1234 --l 4
 ```
 
  </details>
@@ -274,8 +289,11 @@ accelerate launch --num_cpu_threads_per_process 1 src/musubi_tuner/zimage_train.
 - `--mem_eff_save`: Reduces main memory (RAM) usage when saving checkpoints.
 - `--blocks_to_swap`: Swaps model blocks between VRAM and main memory to reduce VRAM usage. This is effective when VRAM is limited.
 - `--disable_numpy_memmap`: Disables numpy memory mapping for model loading, loading with standard file read. Increases RAM usage but may speed up model loading in some cases.
+- `--block_swap_optimizer_patch_params` option is available to patch optimizer parameters for block swapping. 
 
 `--full_bf16` reduces VRAM usage by about 30GB but may impact model accuracy as the weights are kept in bfloat16. Note that the optimizer state is still kept in float32. In addition, it is recommended to use this with an optimizer that supports stochastic rounding. In this repository, Adafactor optimizer with `--fused_backward_pass` option supports stochastic rounding.
+
+`--block_swap_optimizer_patch_params` option moves the gradients to the same device as the parameters during the optimizer step, which makes it work with block swapping. This workaround currently works with AdamW and Adafactor etc. AdamW8bit and other optimizers do not work with this patch due to their specific implementation.
 
 When using `--mem_eff_save`, please note that traditional saving methods are still used when saving the optimizer state in `--save_state`, requiring about 20GB of main memory.
 
@@ -285,11 +303,18 @@ We are still exploring the optimal settings. The configurations above are just e
 
 If you have ample VRAM, you can use any optimizer of your choice. `--full_bf16` is not recommended.
 
-For limited VRAM environments (e.g., 48GB or less), you may need to use `--full_bf16`, the Adafactor optimizer, and `--fused_backward_pass`. Settings above are the recommended options for that case. Please adjust `--lr_warmup_steps` to a value between approximately 10 and 100.
+For limited VRAM environments (e.g., 48GB or less), you can use one of the following options:
 
-`--fused_backward_pass` is not currently compatible with gradient accumulation, and max grad norm may not function as expected, so it is recommended to specify `--max_grad_norm 0`.
+1. Use `--blocks_to_swap` + `--block_swap_optimizer_patch_params` + compatible optimizer.
+2. Use `--blocks_to_swap` + Adafactor + `--fused_backward_pass`.
+3. Use `--full_bf16` + Adafactor optimizer + `--fused_backward_pass`.
+4. Use `--blocks_to_swap` + `--full_bf16` + Adafactor optimizer + `--fused_backward_pass`.
 
-If your VRAM is even more constrained, you can enable block swapping by specifying a value for `--blocks_to_swap`.
+VRAM usage decreases in the order of 1. to 4. (4. being the least). The time taken for training increases in the order of 2. = 3. < 4. < 1. (1. being the slowest). The expected accuracy is in the order of 1. > 2. > 3. = 4. (1. being the highest).
+
+The sample configuration is a recommended setting when using option 3. If VRAM is further constrained, you can also use option 4. Adjust `--lr_warmup_steps` to a value between about 10 and 100.
+
+`--fused_backward_pass` currently does not support gradient accumulation. Also, since max grad norm may not work as expected, it is recommended to specify `--max_grad_norm 0`.
 
 Experience with other models suggests that the learning rate may need to be reduced significantly; something in the range of 1e-6 to 1e-5 might be a good place to start.
 
@@ -306,8 +331,11 @@ Finetuningは専用のスクリプト`zimage_train.py`を使用します。こ�
 - `--mem_eff_save`: チェックポイント保存時のメインメモリ（RAM）使用量を削減します。
 - `--blocks_to_swap`: モデルのブロックをVRAMとメインメモリ間でスワップし、VRAM使用量を削減します。VRAMが少ない場合に有効です。
 - `--disable_numpy_memmap`: モデル読み込み時のnumpyメモリマッピングを無効化し、標準のファイル読み込みで読み込みを行います。RAM使用量は増加しますが、場合によってはモデルの読み込みが高速化されます。
+- `--block_swap_optimizer_patch_params`: ブロックスワッピングのためのオプティマイザパラメータをパッチするためのオプションです。
 
 `--full_bf16`はVRAM使用量を約30GB削減しますが、重みがbfloat16で保持されるため、モデルの精度に影響を与える可能性があります。オプティマイザの状態はfloat32で保持されます。また、効率的な学習のために、stochastic roundingをサポートするオプティマイザとの併用が推奨されます。このリポジトリでは、`adafactor`オプティマイザに`--fused_backward_pass`オプションの組み合わせでstochastic roundingをサポートしています。
+
+`--block_swap_optimizer_patch_params`オプションにより、オプティマイザステップ中に勾配がパラメータと同じデバイスに移動され、ブロックスワッピングで動作するようになります。この回避策は現在AdamWやAdafactorなどで動作します。オプティマイザの実装に依存するため、AdamW8bitやその他のオプティマイザはこのパッチでは動作しません。
 
 `--mem_eff_save`を使用する場合でも、`--save_state`においてはオプティマイザの状態を保存する際に従来の保存方法が依然として使用されるため、約20GBのメインメモリが必要であることに注意してください。
 
@@ -317,11 +345,20 @@ Finetuningは専用のスクリプト`zimage_train.py`を使用します。こ�
 
 十分なVRAMがある場合は、お好みのオプティマイザを使用できます。`--full_bf16`は推奨されません。
 
-VRAMが限られている環境（例：48GB以下）の場合は、`--full_bf16`、Adafactorオプティマイザ、および`--fused_backward_pass`を使用する必要があるかもしれません。上記の設定はその場合の推奨オプションです。`--lr_warmup_steps`は約10から100の間の値に調整してください。
+VRAMが限られている環境（例：48GB以下）の場合は、次のいずれかのオプションを利用できます。
+
+1. `--blocks_to_swap`＋`--block_swap_optimizer_patch_params`＋互換性のあるオプティマイザを使用する。
+2. `--blocks_to_swap`＋Adafactor＋`--fused_backward_pass`を使用する。
+3. `--full_bf16`＋Adafactorオプティマイザ＋`--fused_backward_pass`を使用する。
+4. `--blocks_to_swap`＋`--full_bf16`＋Adafactorオプティマイザ＋`--fused_backward_pass`を使用する。
+
+VRAM使用量は1.から4.の順で減少します（4.が最も少ない）。学習にかかる時間は2.=3. < 4. < 1.の順で長くなります（1.が最も遅い）。期待される精度は、1. > 2. > 3. = 4.の順になります（1.が最も高い）。
+
+サンプルの設定は、3.のオプションを使用する場合の推奨設定です。VRAMがさらに制約されている場合は、4.のオプションを使用することもできます。`--lr_warmup_steps`は約10から100の間の値に調整してください。
 
 現時点では`--fused_backward_pass`はgradient accumulationに対応していません。またmax grad normも想定通りに動作しない可能性があるため、`--max_grad_norm 0`を指定することを推奨します。
 
-さらにVRAMが制約されている場合は、`--blocks_to_swap`に値を指定してブロックスワッピングを有効にできます。
+他のモデルでの経験則では、学習率は大幅に減らす必要があるかもしれません。1e-6から1e-5の範囲で試してみると良いでしょう。
 
 </details>
 
@@ -344,7 +381,7 @@ python src/musubi_tuner/zimage_generate_image.py \
 
 - Uses `zimage_generate_image.py`.
 - `--flow_shift` defaults to 3.0.
-- `--guidance_scale` defaults to 0.0 (no classifier-free guidance).
+- `--guidance_scale` defaults to 0.0 (no classifier-free guidance, for Turbo model). Specify a positive value to enable CFG (4.0 is the offcial default for Base model).
 - `--fp8` and `--fp8_scaled` options are available for DiT.
 - `--fp8_llm` option is available for Text Encoder.
 
@@ -357,7 +394,7 @@ python src/musubi_tuner/zimage_generate_image.py \
 
 - `zimage_generate_image.py`を使用します。
 - `--flow_shift`のデフォルトは3.0です。
-- `--guidance_scale`のデフォルトは0.0（Classifier-Free Guidanceなし）です。
+- `--guidance_scale`のデフォルトは0.0（Classifier-Free Guidanceなし、Turboモデル用）です。正の値を指定するとCFGが有効になります（Baseモデルの公式デフォルトは4.0です）。
 - `--fp8`および`--fp8_scaled`オプションがDiTで利用可能です。
 - `--fp8_llm`オプションがテキストエンコーダーで利用可能です。
 - `--blocks_to_swap`オプションで、一部のブロックをCPUにオフロードできます。オフロード可能な最大ブロック数は28です。

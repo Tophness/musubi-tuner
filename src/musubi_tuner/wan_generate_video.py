@@ -22,6 +22,7 @@ import torchvision.transforms.functional as TF
 from tqdm import tqdm
 
 from musubi_tuner.dataset import image_video_dataset
+from musubi_tuner.modules.custom_offloading_utils import BlockSwapConfig
 from musubi_tuner.networks import lora_wan
 from musubi_tuner.utils import model_utils
 from musubi_tuner.utils.lora_utils import filter_lora_state_dict
@@ -707,9 +708,8 @@ def load_dit_model(
 
     if args.blocks_to_swap > 0:
         logger.info(f"Enable swap {args.blocks_to_swap} blocks to CPU from device: {device}")
-        model.enable_block_swap(
-            args.blocks_to_swap, device, supports_backward=False, use_pinned_memory=args.use_pinned_memory_for_block_swap
-        )
+        swap_config = BlockSwapConfig(device, supports_backward=False, use_pinned_memory=args.use_pinned_memory_for_block_swap)
+        model.enable_block_swap(args.blocks_to_swap, swap_config)
         model.move_to_device_except_swap_blocks(device)
         model.prepare_block_swap_before_forward()
     else:
@@ -807,6 +807,8 @@ def merge_lora_weights(
             lycoris_net.merge_to(None, model, weights_sd, dtype=None, device=device)
         else:
             network = lora_module.create_arch_network_from_weights(lora_multiplier, weights_sd, unet=model, for_inference=True)
+            if not network.unet_loras:
+                raise ValueError(f"LoRA {lora_weight} contains no modules that match the model")
             network.merge_to(None, model, weights_sd, device=device, non_blocking=True)
 
         synchronize_device(device)

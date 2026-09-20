@@ -1,8 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
 import glob
-from importlib.util import find_spec
-import json
-import math
 import os
 import random
 import time
@@ -16,142 +13,35 @@ SharedEpoch = Optional["Synchronized[int]"]
 
 import numpy as np
 import torch
-from safetensors.torch import save_file, load_file
 from PIL import Image
-import cv2
-import av
 
 from musubi_tuner.utils import safetensors_utils
-from musubi_tuner.utils.model_utils import dtype_to_str
+from musubi_tuner.utils.model_utils import remove_dtype_suffix
 
 import logging
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-
-IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".PNG", ".JPG", ".JPEG", ".WEBP", ".BMP", ".avif", ".AVIF"]
-
-
-if find_spec("jxlpy") is not None:  # JPEG-XL on Linux
-    from jxlpy import JXLImagePlugin  # noqa: F401 # type: ignore
-
-    IMAGE_EXTENSIONS.extend([".jxl", ".JXL"])
-
-if find_spec("pillow_jxl") is not None:  # JPEG-XL on Windows
-    import pillow_jxl  # noqa: F401 # type: ignore
-
-    IMAGE_EXTENSIONS.extend([".jxl", ".JXL"])
-
-VIDEO_EXTENSIONS = [
-    ".mp4",
-    ".webm",
-    ".avi",
-    ".mkv",
-    ".mov",
-    ".flv",
-    ".wmv",
-    ".m4v",
-    ".mpg",
-    ".mpeg",
-    ".MP4",
-    ".WEBM",
-    ".AVI",
-    ".MKV",
-    ".MOV",
-    ".FLV",
-    ".WMV",
-    ".M4V",
-    ".MPG",
-    ".MPEG",
-]  # some of them are not tested
-
-# Architecture short names cannot contain underscore
-ARCHITECTURE_HUNYUAN_VIDEO = "hv"
-ARCHITECTURE_HUNYUAN_VIDEO_FULL = "hunyuan_video"
-ARCHITECTURE_WAN = "wan"
-ARCHITECTURE_WAN_FULL = "wan"
-ARCHITECTURE_FRAMEPACK = "fp"
-ARCHITECTURE_FRAMEPACK_FULL = "framepack"
-ARCHITECTURE_FLUX_KONTEXT = "fk"
-ARCHITECTURE_FLUX_KONTEXT_FULL = "flux_kontext"
-ARCHITECTURE_QWEN_IMAGE = "qi"
-ARCHITECTURE_QWEN_IMAGE_FULL = "qwen_image"
-ARCHITECTURE_QWEN_IMAGE_EDIT = "qie"
-ARCHITECTURE_QWEN_IMAGE_EDIT_FULL = "qwen_image_edit"
-ARCHITECTURE_KANDINSKY5 = "k5"
-ARCHITECTURE_KANDINSKY5_FULL = "kandinsky5"
-ARCHITECTURE_HUNYUAN_VIDEO_1_5 = "hv15"
-ARCHITECTURE_HUNYUAN_VIDEO_1_5_FULL = "hunyuan_video_1_5"
-ARCHITECTURE_Z_IMAGE = "zi"
-ARCHITECTURE_Z_IMAGE_FULL = "z_image"
-
-
-def glob_images(directory, base="*"):
-    img_paths = []
-    for ext in IMAGE_EXTENSIONS:
-        if base == "*":
-            img_paths.extend(glob.glob(os.path.join(glob.escape(directory), base + ext)))
-        else:
-            img_paths.extend(glob.glob(glob.escape(os.path.join(directory, base + ext))))
-    img_paths = list(set(img_paths))  # remove duplicates
-    img_paths.sort()
-    return img_paths
-
-
-def glob_videos(directory, base="*"):
-    video_paths = []
-    for ext in VIDEO_EXTENSIONS:
-        if base == "*":
-            video_paths.extend(glob.glob(os.path.join(glob.escape(directory), base + ext)))
-        else:
-            video_paths.extend(glob.glob(glob.escape(os.path.join(directory, base + ext))))
-    video_paths = list(set(video_paths))  # remove duplicates
-    video_paths.sort()
-    return video_paths
-
-
-def divisible_by(num: int, divisor: int) -> int:
-    return num - num % divisor
-
-
-def resize_image_to_bucket(image: Union[Image.Image, np.ndarray], bucket_reso: tuple[int, int]) -> np.ndarray:
-    """
-    Resize the image to the bucket resolution.
-
-    bucket_reso: **(width, height)**
-    """
-    is_pil_image = isinstance(image, Image.Image)
-    if is_pil_image:
-        image_width, image_height = image.size
-    else:
-        image_height, image_width = image.shape[:2]
-
-    if bucket_reso == (image_width, image_height):
-        return np.array(image) if is_pil_image else image
-
-    bucket_width, bucket_height = bucket_reso
-
-    # resize the image to the bucket resolution to match the short side
-    scale_width = bucket_width / image_width
-    scale_height = bucket_height / image_height
-    scale = max(scale_width, scale_height)
-    image_width = int(image_width * scale + 0.5)
-    image_height = int(image_height * scale + 0.5)
-
-    if scale > 1:
-        image = Image.fromarray(image) if not is_pil_image else image
-        image = image.resize((image_width, image_height), Image.LANCZOS)
-        image = np.array(image)
-    else:
-        image = np.array(image) if is_pil_image else image
-        image = cv2.resize(image, (image_width, image_height), interpolation=cv2.INTER_AREA)
-
-    # crop the image to the bucket resolution
-    crop_left = (image_width - bucket_width) // 2
-    crop_top = (image_height - bucket_height) // 2
-    image = image[crop_top : crop_top + bucket_height, crop_left : crop_left + bucket_width]
-    return image
+from musubi_tuner.dataset.architectures import *  # noqa: F401,F403
+from musubi_tuner.dataset.architectures import (  # explicit imports for local use
+    ARCHITECTURE_FLUX_2_DEV,
+    ARCHITECTURE_FLUX_2_KLEIN_4B,
+    ARCHITECTURE_FLUX_2_KLEIN_9B,
+    ARCHITECTURE_FLUX_KONTEXT,
+    ARCHITECTURE_FRAMEPACK,
+    ARCHITECTURE_HIDREAM_O1,
+    ARCHITECTURE_HUNYUAN_VIDEO,
+    ARCHITECTURE_HUNYUAN_VIDEO_1_5,
+    ARCHITECTURE_KANDINSKY5,
+    ARCHITECTURE_MINIMAX_H3,
+    ARCHITECTURE_QWEN_IMAGE_EDIT,
+    ARCHITECTURE_WAN,
+    round_down_frame_count,
+)
+from musubi_tuner.dataset.audio_utils import AudioSpec, audio_window_start, slice_audio_window
+from musubi_tuner.dataset.media_utils import *  # noqa: F401,F403
+from musubi_tuner.dataset.media_utils import resize_image_to_bucket  # explicit import for local use
 
 
 class ItemInfo:
@@ -162,7 +52,7 @@ class ItemInfo:
         original_size: tuple[int, int],
         bucket_size: Optional[tuple[Any]] = None,
         frame_count: Optional[int] = None,
-        content: Optional[np.ndarray] = None,
+        content: Optional[Union[np.ndarray, list[np.ndarray]]] = None,
         latent_cache_path: Optional[str] = None,
     ) -> None:
         self.item_key = item_key
@@ -177,6 +67,18 @@ class ItemInfo:
         # np.ndarray for video, list[np.ndarray] for image with multiple controls
         self.control_content: Optional[Union[np.ndarray, list[np.ndarray]]] = None
 
+        # provenance: the index of the originating dataset in its DatasetGroup, the index of the
+        # originating datasource record (image and video datasets) and, for video crops, the
+        # start frame of the crop in target-fps space
+        self.dataset_index: Optional[int] = None
+        self.datasource_index: Optional[int] = None
+        self.frame_pos: Optional[int] = None
+
+        # audio (audio-capable architectures): waveform window [channels, samples] aligned to
+        # the crop, and whether it came from real audio (False: silence placeholder)
+        self.audio_content: Optional[torch.Tensor] = None
+        self.audio_present: Optional[bool] = None
+
         # FramePack architecture specific
         self.fp_latent_window_size: Optional[int] = None
         self.fp_1f_clean_indices: Optional[list[int]] = None  # indices of clean latents for 1f
@@ -187,1276 +89,33 @@ class ItemInfo:
         return (
             f"ItemInfo(item_key={self.item_key}, caption={self.caption}, "
             + f"original_size={self.original_size}, bucket_size={self.bucket_size}, "
-            + f"frame_count={self.frame_count}, latent_cache_path={self.latent_cache_path}, content={self.content.shape if self.content is not None else None})"
+            + f"frame_count={self.frame_count}, latent_cache_path={self.latent_cache_path}, "
+            + f"content={[c.shape for c in self.content] if isinstance(self.content, list) else (self.content.shape if self.content is not None else None)}), "
+            + f"control_content={[cc.shape for cc in self.control_content] if isinstance(self.control_content, list) else (self.control_content.shape if self.control_content is not None else None)})"
         )
 
 
-# We use simple if-else approach to support multiple architectures.
-# Maybe we can use a plugin system in the future.
+from musubi_tuner.dataset.cache_io import *  # noqa: F401,F403
 
-# the keys of the dict are `<content_type>_FxHxW_<dtype>` for latents
-# and `<content_type>_<dtype|mask>` for other tensors
 
+from musubi_tuner.dataset.bucket import BucketSelector, BucketBatchManager  # noqa: F401
 
-def save_latent_cache(item_info: ItemInfo, latent: torch.Tensor):
-    """HunyuanVideo architecture. HunyuanVideo doesn't support I2V and control latents"""
-    assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
 
-    _, F, H, W = latent.shape
-    dtype_str = dtype_to_str(latent.dtype)
-    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu()}
+from musubi_tuner.dataset.datasources import (  # noqa: F401
+    ContentDatasource,
+    ImageDatasource,
+    ImageDirectoryDatasource,
+    ImageJsonlDatasource,
+    VideoDatasource,
+    VideoDirectoryDatasource,
+    VideoJsonlDatasource,
+)
 
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_HUNYUAN_VIDEO_FULL)
 
-
-def save_latent_cache_wan(
-    item_info: ItemInfo,
-    latent: torch.Tensor,
-    clip_embed: Optional[torch.Tensor],
-    image_latent: Optional[torch.Tensor],
-    control_latent: Optional[torch.Tensor],
-    f_indices: Optional[list[int]] = None,
-):
-    """Wan architecture"""
-    assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
-
-    _, F, H, W = latent.shape
-    dtype_str = dtype_to_str(latent.dtype)
-    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu()}
-
-    if clip_embed is not None:
-        sd[f"clip_{dtype_str}"] = clip_embed.detach().cpu()
-
-    if image_latent is not None:
-        sd[f"latents_image_{F}x{H}x{W}_{dtype_str}"] = image_latent.detach().cpu()
-
-    if control_latent is not None:
-        sd[f"latents_control_{F}x{H}x{W}_{dtype_str}"] = control_latent.detach().cpu()
-
-    if f_indices is not None:
-        dtype_str = dtype_to_str(torch.int32)
-        sd[f"f_indices_{dtype_str}"] = torch.tensor(f_indices, dtype=torch.int32)
-
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_WAN_FULL)
-
-
-def save_latent_cache_framepack(
-    item_info: ItemInfo,
-    latent: torch.Tensor,
-    latent_indices: torch.Tensor,
-    clean_latents: torch.Tensor,
-    clean_latent_indices: torch.Tensor,
-    clean_latents_2x: torch.Tensor,
-    clean_latent_2x_indices: torch.Tensor,
-    clean_latents_4x: torch.Tensor,
-    clean_latent_4x_indices: torch.Tensor,
-    image_embeddings: torch.Tensor,
-):
-    """FramePack architecture"""
-    assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
-
-    _, F, H, W = latent.shape
-    dtype_str = dtype_to_str(latent.dtype)
-    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu().contiguous()}
-
-    # `latents_xxx` must have {F, H, W} suffix
-    indices_dtype_str = dtype_to_str(latent_indices.dtype)
-    sd[f"image_embeddings_{dtype_str}"] = image_embeddings.detach().cpu()  # image embeddings dtype is same as latents dtype
-    sd[f"latent_indices_{indices_dtype_str}"] = latent_indices.detach().cpu()
-    sd[f"clean_latent_indices_{indices_dtype_str}"] = clean_latent_indices.detach().cpu()
-    sd[f"latents_clean_{F}x{H}x{W}_{dtype_str}"] = clean_latents.detach().cpu().contiguous()
-    if clean_latent_2x_indices is not None:
-        sd[f"clean_latent_2x_indices_{indices_dtype_str}"] = clean_latent_2x_indices.detach().cpu()
-    if clean_latents_2x is not None:
-        sd[f"latents_clean_2x_{F}x{H}x{W}_{dtype_str}"] = clean_latents_2x.detach().cpu().contiguous()
-    if clean_latent_4x_indices is not None:
-        sd[f"clean_latent_4x_indices_{indices_dtype_str}"] = clean_latent_4x_indices.detach().cpu()
-    if clean_latents_4x is not None:
-        sd[f"latents_clean_4x_{F}x{H}x{W}_{dtype_str}"] = clean_latents_4x.detach().cpu().contiguous()
-
-    # for key, value in sd.items():
-    #     print(f"{key}: {value.shape}")
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_FRAMEPACK_FULL)
-
-
-def save_latent_cache_flux_kontext(
-    item_info: ItemInfo,
-    latent: torch.Tensor,
-    control_latent: torch.Tensor,
-):
-    """FLUX.1 Kontext architecture"""
-    assert latent.dim() == 3, "latent should be 3D tensor (channel, height, width)"
-
-    _, H, W = latent.shape
-    F = 1
-    dtype_str = dtype_to_str(latent.dtype)
-    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu().contiguous()}
-
-    _, H, W = control_latent.shape
-    F = 1
-    sd[f"latents_control_{F}x{H}x{W}_{dtype_str}"] = control_latent.detach().cpu().contiguous()
-
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_FLUX_KONTEXT_FULL)
-
-
-def save_latent_cache_qwen_image(item_info: ItemInfo, latent: torch.Tensor, control_latent: Optional[list[torch.Tensor]]):
-    """Qwen-Image architecture"""
-    assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
-    assert control_latent is None or all(cl.dim() == 4 for cl in control_latent), (
-        "control_latent should be 4D tensor (frame, channel, height, width) or None"
-    )
-
-    _, F, H, W = latent.shape
-    dtype_str = dtype_to_str(latent.dtype)
-    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu().contiguous()}
-
-    if control_latent is not None:
-        for i, cl in enumerate(control_latent):
-            _, F, H, W = cl.shape
-            sd[f"latents_control_{i}_{F}x{H}x{W}_{dtype_str}"] = cl.detach().cpu().contiguous()
-
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_QWEN_IMAGE_FULL)
-
-
-def save_latent_cache_kandinsky5(
-    item_info: ItemInfo,
-    latent: torch.Tensor,
-    image_latent: Optional[torch.Tensor] = None,
-    control_latent: Optional[torch.Tensor] = None,
-    scaling_factor: Optional[float] = None,
-):
-    """Kandinsky 5 architecture (image/video), with optional source/control latents for i2v/control."""
-    assert latent.dim() == 3 or latent.dim() == 4, "latent should be 3D (C,H,W) or 4D (F,C,H,W) tensor"
-
-    if latent.dim() == 4:
-        _, F, H, W = latent.shape
-    else:
-        F, H, W = 1, latent.shape[1], latent.shape[2]
-        latent = latent.unsqueeze(0)
-    dtype_str = dtype_to_str(latent.dtype)
-    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu().contiguous().clone()}
-
-    if image_latent is not None:
-        _, F_img, H_img, W_img = image_latent.shape
-        sd[f"latents_image_{F_img}x{H_img}x{W_img}_{dtype_str}"] = image_latent.detach().cpu().contiguous().clone()
-
-    if control_latent is not None:
-        _, F_ctrl, H_ctrl, W_ctrl = control_latent.shape
-        sd[f"latents_control_{F_ctrl}x{H_ctrl}x{W_ctrl}_{dtype_str}"] = control_latent.detach().cpu().contiguous().clone()
-
-    if scaling_factor is not None:
-        sd["vae_scaling_factor"] = torch.tensor(float(scaling_factor))
-
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_KANDINSKY5_FULL)
-
-
-def save_latent_cache_hunyuan_video_1_5(
-    item_info: ItemInfo,
-    latent: torch.Tensor,
-    image_latent: Optional[torch.Tensor],
-    vision_feature: Optional[torch.Tensor],
-):
-    """HunyuanVideo 1.5 architecture"""
-    _, F, H, W = latent.shape
-    dtype_str = dtype_to_str(latent.dtype)
-    sd: dict[str, torch.Tensor] = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu()}
-
-    if image_latent is not None:
-        dtype_str = dtype_to_str(image_latent.dtype)
-        _, F, H, W = image_latent.shape
-        sd[f"latents_image_{F}x{H}x{W}_{dtype_str}"] = image_latent.detach().cpu()
-
-    if vision_feature is not None:
-        dtype_str = dtype_to_str(vision_feature.dtype)
-        sd[f"siglip_{dtype_str}"] = vision_feature.detach().cpu()
-
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_HUNYUAN_VIDEO_1_5_FULL)
-
-
-def save_latent_cache_z_image(item_info: ItemInfo, latent: torch.Tensor):
-    """Z-Image architecture. No control latent is supported."""
-    assert latent.dim() == 3, "latent should be 3D tensor (channel, height, width)"
-
-    C, H, W = latent.shape
-    F = 1
-    dtype_str = dtype_to_str(latent.dtype)
-    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu().contiguous()}
-
-    save_latent_cache_common(item_info, sd, ARCHITECTURE_Z_IMAGE_FULL)
-
-
-def save_latent_cache_common(item_info: ItemInfo, sd: dict[str, torch.Tensor], arch_fullname: str):
-    metadata = {
-        "architecture": arch_fullname,
-        "width": f"{item_info.original_size[0]}",
-        "height": f"{item_info.original_size[1]}",
-        "format_version": "1.0.1",
-    }
-    if item_info.frame_count is not None:
-        metadata["frame_count"] = f"{item_info.frame_count}"
-
-    for key, value in sd.items():
-        # NaN check and show warning, replace NaN with 0
-        if torch.isnan(value).any():
-            logger.warning(f"{key} tensor has NaN: {item_info.item_key}, replace NaN with 0")
-            value[torch.isnan(value)] = 0
-
-    latent_dir = os.path.dirname(item_info.latent_cache_path)
-    os.makedirs(latent_dir, exist_ok=True)
-
-    save_file(sd, item_info.latent_cache_path, metadata=metadata)
-
-
-def save_text_encoder_output_cache(item_info: ItemInfo, embed: torch.Tensor, mask: Optional[torch.Tensor], is_llm: bool):
-    """HunyuanVideo architecture"""
-    assert embed.dim() == 1 or embed.dim() == 2, (
-        f"embed should be 2D tensor (feature, hidden_size) or (hidden_size,), got {embed.shape}"
-    )
-    assert mask is None or mask.dim() == 1, f"mask should be 1D tensor (feature), got {mask.shape}"
-
-    sd = {}
-    dtype_str = dtype_to_str(embed.dtype)
-    text_encoder_type = "llm" if is_llm else "clipL"
-    sd[f"{text_encoder_type}_{dtype_str}"] = embed.detach().cpu()
-    if mask is not None:
-        sd[f"{text_encoder_type}_mask"] = mask.detach().cpu()
-
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_HUNYUAN_VIDEO_FULL)
-
-
-def save_text_encoder_output_cache_wan(item_info: ItemInfo, embed: torch.Tensor):
-    """Wan architecture. Wan2.1 only has a single text encoder"""
-
-    sd = {}
-    dtype_str = dtype_to_str(embed.dtype)
-    text_encoder_type = "t5"
-    sd[f"varlen_{text_encoder_type}_{dtype_str}"] = embed.detach().cpu()
-
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_WAN_FULL)
-
-
-def save_text_encoder_output_cache_framepack(
-    item_info: ItemInfo, llama_vec: torch.Tensor, llama_attention_mask: torch.Tensor, clip_l_pooler: torch.Tensor
-):
-    """FramePack architecture."""
-    sd = {}
-    dtype_str = dtype_to_str(llama_vec.dtype)
-    sd[f"llama_vec_{dtype_str}"] = llama_vec.detach().cpu()
-    sd["llama_attention_mask"] = llama_attention_mask.detach().cpu()
-    dtype_str = dtype_to_str(clip_l_pooler.dtype)
-    sd[f"clip_l_pooler_{dtype_str}"] = clip_l_pooler.detach().cpu()
-
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_FRAMEPACK_FULL)
-
-
-def save_text_encoder_output_cache_flux_kontext(item_info: ItemInfo, t5_vec: torch.Tensor, clip_l_pooler: torch.Tensor):
-    """Flux Kontext architecture."""
-
-    sd = {}
-    dtype_str = dtype_to_str(t5_vec.dtype)
-    sd[f"t5_vec_{dtype_str}"] = t5_vec.detach().cpu()
-    dtype_str = dtype_to_str(clip_l_pooler.dtype)
-    sd[f"clip_l_pooler_{dtype_str}"] = clip_l_pooler.detach().cpu()
-
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_FLUX_KONTEXT_FULL)
-
-
-def save_text_encoder_output_cache_qwen_image(item_info: ItemInfo, embed: torch.Tensor):
-    """Qwen-Image architecture."""
-    sd = {}
-    dtype_str = dtype_to_str(embed.dtype)
-    sd[f"varlen_vl_embed_{dtype_str}"] = embed.detach().cpu()
-
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_QWEN_IMAGE_FULL)
-
-
-def save_text_encoder_output_cache_kandinsky5(
-    item_info: ItemInfo, text_embeds: torch.Tensor, pooled_embed: torch.Tensor, attention_mask: torch.Tensor
-):
-    """Kandinsky 5 architecture."""
-    sd = {}
-    dtype_str = dtype_to_str(text_embeds.dtype)
-    sd[f"text_embeds_{dtype_str}"] = text_embeds.detach().cpu()
-    dtype_str = dtype_to_str(pooled_embed.dtype)
-    sd[f"pooled_embed_{dtype_str}"] = pooled_embed.detach().cpu()
-    sd["attention_mask"] = attention_mask.detach().cpu()
-
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_KANDINSKY5_FULL)
-
-
-def save_text_encoder_output_cache_hunyuan_video_1_5(item_info: ItemInfo, embed: torch.Tensor, byt5_embed: torch.Tensor):
-    """Hunyuan-Video 1.5 architecture."""
-    sd = {}
-    dtype_str = dtype_to_str(embed.dtype)
-    sd[f"varlen_vl_embed_{dtype_str}"] = embed.detach().cpu()
-    dtype_str = dtype_to_str(byt5_embed.dtype)
-    sd[f"varlen_byt5_embed_{dtype_str}"] = byt5_embed.detach().cpu()
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_HUNYUAN_VIDEO_1_5_FULL)
-
-
-def save_text_encoder_output_cache_z_image(item_info: ItemInfo, embed: torch.Tensor):
-    """Z-Image architecture."""
-    sd = {}
-    dtype_str = dtype_to_str(embed.dtype)
-    sd[f"varlen_llm_embed_{dtype_str}"] = embed.detach().cpu()
-
-    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_Z_IMAGE_FULL)
-
-
-def save_text_encoder_output_cache_common(item_info: ItemInfo, sd: dict[str, torch.Tensor], arch_fullname: str):
-    for key, value in sd.items():
-        # NaN check and show warning, replace NaN with 0
-        if torch.isnan(value).any():
-            logger.warning(f"{key} tensor has NaN: {item_info.item_key}, replace NaN with 0")
-            value[torch.isnan(value)] = 0
-
-    metadata = {
-        "architecture": arch_fullname,
-        "caption1": item_info.caption,
-        "format_version": "1.0.1",
-    }
-
-    if os.path.exists(item_info.text_encoder_output_cache_path):
-        # load existing cache and update metadata
-        with safetensors_utils.MemoryEfficientSafeOpen(item_info.text_encoder_output_cache_path) as f:
-            existing_metadata = f.metadata()
-            for key in f.keys():
-                if key not in sd:  # avoid overwriting by existing cache, we keep the new one
-                    sd[key] = f.get_tensor(key)
-
-        assert existing_metadata["architecture"] == metadata["architecture"], "architecture mismatch"
-        if existing_metadata["caption1"] != metadata["caption1"]:
-            logger.warning(f"caption mismatch: existing={existing_metadata['caption1']}, new={metadata['caption1']}, overwrite")
-        # TODO verify format_version
-
-        existing_metadata.pop("caption1", None)
-        existing_metadata.pop("format_version", None)
-        metadata.update(existing_metadata)  # copy existing metadata except caption and format_version
-    else:
-        text_encoder_output_dir = os.path.dirname(item_info.text_encoder_output_cache_path)
-        os.makedirs(text_encoder_output_dir, exist_ok=True)
-
-    safetensors_utils.mem_eff_save_file(sd, item_info.text_encoder_output_cache_path, metadata=metadata)
-
-
-class BucketSelector:
-    RESOLUTION_STEPS_HUNYUAN = 16
-    RESOLUTION_STEPS_WAN = 16
-    RESOLUTION_STEPS_FRAMEPACK = 16
-    RESOLUTION_STEPS_FLUX_KONTEXT = 16
-    RESOLUTION_STEPS_QWEN_IMAGE = 16
-    RESOLUTION_STEPS_QWEN_IMAGE_EDIT = 16
-    RESOLUTION_STEPS_KANDINSKY5 = 16
-    RESOLUTION_STEPS_HUNYUAN_VIDEO_1_5 = 16
-    RESOLUTION_STEPS_Z_IMAGE = 16
-
-    ARCHITECTURE_STEPS_MAP = {
-        ARCHITECTURE_HUNYUAN_VIDEO: RESOLUTION_STEPS_HUNYUAN,
-        ARCHITECTURE_WAN: RESOLUTION_STEPS_WAN,
-        ARCHITECTURE_FRAMEPACK: RESOLUTION_STEPS_FRAMEPACK,
-        ARCHITECTURE_FLUX_KONTEXT: RESOLUTION_STEPS_FLUX_KONTEXT,
-        ARCHITECTURE_QWEN_IMAGE: RESOLUTION_STEPS_QWEN_IMAGE,
-        ARCHITECTURE_QWEN_IMAGE_EDIT: RESOLUTION_STEPS_QWEN_IMAGE_EDIT,
-        ARCHITECTURE_KANDINSKY5: RESOLUTION_STEPS_KANDINSKY5,
-        ARCHITECTURE_HUNYUAN_VIDEO_1_5: RESOLUTION_STEPS_HUNYUAN_VIDEO_1_5,
-        ARCHITECTURE_Z_IMAGE: RESOLUTION_STEPS_Z_IMAGE,
-    }
-
-    def __init__(
-        self, resolution: Tuple[int, int], enable_bucket: bool = True, no_upscale: bool = False, architecture: str = "no_default"
-    ):
-        self.resolution = resolution
-        self.bucket_area = resolution[0] * resolution[1]
-        self.architecture = architecture
-
-        if architecture in BucketSelector.ARCHITECTURE_STEPS_MAP:
-            self.reso_steps = BucketSelector.ARCHITECTURE_STEPS_MAP[architecture]
-        else:
-            raise ValueError(f"Invalid architecture: {architecture}")
-
-        if not enable_bucket:
-            # only define one bucket
-            self.bucket_resolutions = [resolution]
-            self.no_upscale = False
-        else:
-            # prepare bucket resolution
-            self.no_upscale = no_upscale
-            sqrt_size = int(math.sqrt(self.bucket_area))
-            min_size = divisible_by(sqrt_size // 2, self.reso_steps)
-            self.bucket_resolutions = []
-            for w in range(min_size, sqrt_size + self.reso_steps, self.reso_steps):
-                h = divisible_by(self.bucket_area // w, self.reso_steps)
-                self.bucket_resolutions.append((w, h))
-                self.bucket_resolutions.append((h, w))
-
-            self.bucket_resolutions = list(set(self.bucket_resolutions))
-            self.bucket_resolutions.sort()
-
-        # calculate aspect ratio to find the nearest resolution
-        self.aspect_ratios = np.array([w / h for w, h in self.bucket_resolutions])
-
-    def get_bucket_resolution(self, image_size: tuple[int, int]) -> tuple[int, int]:
-        """
-        return the bucket resolution for the given image size, (width, height)
-        """
-        area = image_size[0] * image_size[1]
-        if self.no_upscale and area <= self.bucket_area:
-            w, h = image_size
-            w = divisible_by(w, self.reso_steps)
-            h = divisible_by(h, self.reso_steps)
-            return w, h
-
-        aspect_ratio = image_size[0] / image_size[1]
-        ar_errors = self.aspect_ratios - aspect_ratio
-        bucket_id = np.abs(ar_errors).argmin()
-        return self.bucket_resolutions[bucket_id]
-
-    @classmethod
-    def calculate_bucket_resolution(
-        cls,
-        image_size: tuple[int, int],
-        resolution: tuple[int, int],
-        reso_steps: Optional[int] = None,
-        architecture: Optional[str] = None,
-    ) -> tuple[int, int]:
-        """
-        Get the bucket resolution for the given image size, resolution and resolution steps.
-        Return (width, height).
-        """
-        if reso_steps is None and architecture is None:
-            raise ValueError("resolution steps or architecture must be provided")
-        if reso_steps is None and architecture is not None:
-            if architecture in BucketSelector.ARCHITECTURE_STEPS_MAP:
-                reso_steps = BucketSelector.ARCHITECTURE_STEPS_MAP[architecture]
-            else:
-                raise ValueError(f"Invalid architecture: {architecture}")
-
-        max_area = resolution[0] * resolution[1]
-        width, height = image_size
-        aspect_ratio = width / height
-        bucket_width = int(math.sqrt(max_area * aspect_ratio))
-        bucket_height = int(math.sqrt(max_area / aspect_ratio))
-        bucket_width = divisible_by(bucket_width, reso_steps)
-        bucket_height = divisible_by(bucket_height, reso_steps)
-
-        # find appropriate resolutions
-        best_resolution = None
-        best_aspect_ratio_diff = float("inf")
-        for i in range(-2, 3):
-            w = bucket_width + i * reso_steps
-            h = divisible_by(max_area // w, reso_steps)
-            current_aspect_ratio_diff = abs((w / h) - aspect_ratio)
-            if current_aspect_ratio_diff < best_aspect_ratio_diff:
-                best_aspect_ratio_diff = current_aspect_ratio_diff
-                best_resolution = (w, h)
-
-        if best_resolution is not None:
-            return best_resolution
-
-        return bucket_width, bucket_height
-
-
-def load_video(
-    video_path: str,
-    start_frame: Optional[int] = None,
-    end_frame: Optional[int] = None,
-    bucket_selector: Optional[BucketSelector] = None,
-    bucket_reso: Optional[tuple[int, int]] = None,
-    source_fps: Optional[float] = None,
-    target_fps: Optional[float] = None,
-) -> list[np.ndarray]:
-    """
-    bucket_reso: if given, resize the video to the bucket resolution, (width, height)
-    """
-    if source_fps is None or target_fps is None:
-        if os.path.isfile(video_path):
-            container = av.open(video_path)
-            video = []
-            for i, frame in enumerate(container.decode(video=0)):
-                if start_frame is not None and i < start_frame:
-                    continue
-                if end_frame is not None and i >= end_frame:
-                    break
-                frame = frame.to_image()
-
-                if bucket_selector is not None and bucket_reso is None:
-                    bucket_reso = bucket_selector.get_bucket_resolution(frame.size)  # calc resolution from first frame
-
-                if bucket_reso is not None:
-                    frame = resize_image_to_bucket(frame, bucket_reso)
-                else:
-                    frame = np.array(frame)
-
-                video.append(frame)
-            container.close()
-        else:
-            # load images in the directory
-            image_files = glob_images(video_path)
-            image_files.sort()
-            video = []
-            for i in range(len(image_files)):
-                if start_frame is not None and i < start_frame:
-                    continue
-                if end_frame is not None and i >= end_frame:
-                    break
-
-                image_file = image_files[i]
-                image = Image.open(image_file).convert("RGB")
-
-                if bucket_selector is not None and bucket_reso is None:
-                    bucket_reso = bucket_selector.get_bucket_resolution(image.size)  # calc resolution from first frame
-                image = np.array(image)
-                if bucket_reso is not None:
-                    image = resize_image_to_bucket(image, bucket_reso)
-
-                video.append(image)
-    else:
-        # drop frames to match the target fps TODO commonize this code with the above if this works
-        frame_index_delta = target_fps / source_fps  # example: 16 / 30 = 0.5333
-        if os.path.isfile(video_path):
-            container = av.open(video_path)
-            video = []
-            frame_index_with_fraction = 0.0
-            previous_frame_index = -1
-            for i, frame in enumerate(container.decode(video=0)):
-                target_frame_index = int(frame_index_with_fraction)
-                frame_index_with_fraction += frame_index_delta
-
-                if target_frame_index == previous_frame_index:  # drop this frame
-                    continue
-
-                # accept this frame
-                previous_frame_index = target_frame_index
-
-                if start_frame is not None and target_frame_index < start_frame:
-                    continue
-                if end_frame is not None and target_frame_index >= end_frame:
-                    break
-                frame = frame.to_image()
-
-                if bucket_selector is not None and bucket_reso is None:
-                    bucket_reso = bucket_selector.get_bucket_resolution(frame.size)  # calc resolution from first frame
-
-                if bucket_reso is not None:
-                    frame = resize_image_to_bucket(frame, bucket_reso)
-                else:
-                    frame = np.array(frame)
-
-                video.append(frame)
-            container.close()
-        else:
-            # load images in the directory
-            image_files = glob_images(video_path)
-            image_files.sort()
-            video = []
-            frame_index_with_fraction = 0.0
-            previous_frame_index = -1
-            for i in range(len(image_files)):
-                target_frame_index = int(frame_index_with_fraction)
-                frame_index_with_fraction += frame_index_delta
-
-                if target_frame_index == previous_frame_index:  # drop this frame
-                    continue
-
-                # accept this frame
-                previous_frame_index = target_frame_index
-
-                if start_frame is not None and target_frame_index < start_frame:
-                    continue
-                if end_frame is not None and target_frame_index >= end_frame:
-                    break
-
-                image_file = image_files[i]
-                image = Image.open(image_file).convert("RGB")
-
-                if bucket_selector is not None and bucket_reso is None:
-                    bucket_reso = bucket_selector.get_bucket_resolution(image.size)  # calc resolution from first frame
-                image = np.array(image)
-                if bucket_reso is not None:
-                    image = resize_image_to_bucket(image, bucket_reso)
-
-                video.append(image)
-
-    return video
-
-
-class BucketBatchManager:
-    def __init__(
-        self, bucketed_item_info: dict[tuple[Any], list[ItemInfo]], batch_size: int, num_timestep_buckets: Optional[int] = None
-    ):
-        self.batch_size = batch_size
-        self.buckets = bucketed_item_info
-        self.bucket_resos = list(self.buckets.keys())
-        self.bucket_resos.sort()
-        self.num_timestep_buckets = num_timestep_buckets
-        self.timestep_pool = None
-
-        # indices for enumerating batches. each batch is reso + batch_idx. reso is (width, height) or (width, height, frames)
-        self.bucket_batch_indices: list[tuple[tuple[Any], int]] = []
-        for bucket_reso in self.bucket_resos:
-            bucket = self.buckets[bucket_reso]
-            num_batches = math.ceil(len(bucket) / self.batch_size)
-            for i in range(num_batches):
-                self.bucket_batch_indices.append((bucket_reso, i))
-
-        # do no shuffle here to avoid multiple datasets have different order
-        # self.shuffle()
-
-    def show_bucket_info(self):
-        for bucket_reso in self.bucket_resos:
-            bucket = self.buckets[bucket_reso]
-            logger.info(f"bucket: {bucket_reso}, count: {len(bucket)}")
-
-        logger.info(f"total batches: {len(self)}")
-
-    def shuffle(self):
-        # shuffle each bucket
-        for bucket in self.buckets.values():
-            random.shuffle(bucket)
-
-        # shuffle the order of batches
-        random.shuffle(self.bucket_batch_indices)
-
-        if self.num_timestep_buckets is not None and self.num_timestep_buckets > 1:
-            # prepare timesteps for each timestep buckets
-
-            # 1. Calculate total number of timesteps needed for the entire epoch
-            num_batches = len(self.bucket_batch_indices)
-            total_timesteps_needed = num_batches * self.batch_size
-
-            # 2. Generate a single large pool of stratified timesteps
-            all_timesteps = []
-            samples_per_bucket = math.ceil(total_timesteps_needed / self.num_timestep_buckets)
-
-            for i in range(self.num_timestep_buckets):
-                min_t = i / self.num_timestep_buckets
-                max_t = (i + 1) / self.num_timestep_buckets
-                for _ in range(samples_per_bucket):
-                    all_timesteps.append(random.uniform(min_t, max_t))
-
-            # 3. Shuffle the entire pool thoroughly
-            random.shuffle(all_timesteps)
-
-            # Trim the excess timesteps to match the exact number needed
-            all_timesteps = all_timesteps[:total_timesteps_needed]
-
-            # 4. Create the final timestep pool by chunking the shuffled list
-            self.timestep_pool = []
-            for i in range(num_batches):
-                start_idx = i * self.batch_size
-                end_idx = start_idx + self.batch_size
-                self.timestep_pool.append(all_timesteps[start_idx:end_idx])
-                # print(f"timestep pool {i}: {self.timestep_pool[-1]}")
-
-    def __len__(self):
-        return len(self.bucket_batch_indices)
-
-    def __getitem__(self, idx):
-        bucket_reso, batch_idx = self.bucket_batch_indices[idx]
-        bucket = self.buckets[bucket_reso]
-        start = batch_idx * self.batch_size
-        end = min(start + self.batch_size, len(bucket))
-
-        batch_tensor_data = {}
-        varlen_keys = set()
-        for item_info in bucket[start:end]:
-            sd_latent = load_file(item_info.latent_cache_path)
-            sd_te = load_file(item_info.text_encoder_output_cache_path)
-            sd = {**sd_latent, **sd_te}
-
-            # TODO refactor this
-            for key in sd.keys():
-                is_varlen_key = key.startswith("varlen_")  # varlen keys are not stacked
-                content_key = key
-
-                if is_varlen_key:
-                    content_key = content_key.replace("varlen_", "")
-
-                if content_key.endswith("_mask"):
-                    pass
-                else:
-                    content_key = content_key.rsplit("_", 1)[0]  # remove dtype
-                    if content_key.startswith("latents_"):
-                        content_key = content_key.rsplit("_", 1)[0]  # remove FxHxW
-
-                if content_key not in batch_tensor_data:
-                    batch_tensor_data[content_key] = []
-                batch_tensor_data[content_key].append(sd[key])
-
-                if is_varlen_key:
-                    varlen_keys.add(content_key)
-
-        for key in batch_tensor_data.keys():
-            if key not in varlen_keys:
-                batch_tensor_data[key] = torch.stack(batch_tensor_data[key])
-
-        if self.timestep_pool is not None:
-            batch_tensor_data["timesteps"] = self.timestep_pool[idx][: end - start]  # use the pre-generated timesteps
-        else:
-            batch_tensor_data["timesteps"] = None
-
-        return batch_tensor_data
-
-
-class ContentDatasource:
-    def __init__(self):
-        self.caption_only = False  # set to True to only fetch caption for Text Encoder caching
-        self.has_control = False
-
-    def set_caption_only(self, caption_only: bool):
-        self.caption_only = caption_only
-
-    def is_indexable(self):
-        return False
-
-    def get_caption(self, idx: int) -> tuple[str, str]:
-        """
-        Returns caption. May not be called if is_indexable() returns False.
-        """
-        raise NotImplementedError
-
-    def __len__(self):
-        raise NotImplementedError
-
-    def __iter__(self):
-        raise NotImplementedError
-
-    def __next__(self):
-        raise NotImplementedError
-
-
-class ImageDatasource(ContentDatasource):
-    def __init__(self):
-        super().__init__()
-
-    def get_image_data(self, idx: int) -> tuple[str, Image.Image, str]:
-        """
-        Returns image data as a tuple of image path, image, and caption for the given index.
-        Key must be unique and valid as a file name.
-        May not be called if is_indexable() returns False.
-        """
-        raise NotImplementedError
-
-
-class ImageDirectoryDatasource(ImageDatasource):
-    def __init__(
-        self,
-        image_directory: str,
-        caption_extension: Optional[str] = None,
-        control_directory: Optional[str] = None,
-        control_count_per_image: Optional[int] = None,
-    ):
-        super().__init__()
-        self.image_directory = image_directory
-        self.caption_extension = caption_extension
-        self.control_directory = control_directory
-        self.control_count_per_image = control_count_per_image
-        self.current_idx = 0
-
-        # glob images
-        logger.info(f"glob images in {self.image_directory}")
-        self.image_paths = glob_images(self.image_directory)
-        logger.info(f"found {len(self.image_paths)} images")
-
-        # glob control images if specified
-        if self.control_directory is not None:
-            logger.info(f"glob control images in {self.control_directory}")
-            self.has_control = True
-            self.control_paths = {}
-
-            # sort image paths for matching control images properly: longer names first
-            image_paths_sorted = sorted(self.image_paths, key=lambda p: len(os.path.basename(p)), reverse=True)
-
-            # glob control images first
-            all_control_image_paths = set(glob_images(self.control_directory))
-
-            for image_path in image_paths_sorted:
-                image_basename = os.path.basename(image_path)
-                image_basename_no_ext = os.path.splitext(image_basename)[0]
-
-                # find matching control images
-                potential_paths = [
-                    p
-                    for p in all_control_image_paths
-                    if os.path.basename(p).startswith(image_basename_no_ext + ".")
-                    or os.path.basename(p).startswith(image_basename_no_ext + "_")
-                ]
-
-                # remove to avoid duplicate matching
-                all_control_image_paths.difference_update(potential_paths)
-
-                if potential_paths:
-                    # sort by the digits (`_0000`) suffix, prefer the one without the suffix
-                    def sort_key(path):
-                        basename = os.path.basename(path)
-                        basename_no_ext = os.path.splitext(basename)[0]
-                        if image_basename_no_ext == basename_no_ext:  # prefer the one without suffix
-                            return 0
-                        digits_suffix = basename_no_ext.rsplit("_", 1)[-1]
-                        if not digits_suffix.isdigit():
-                            raise ValueError(f"Invalid digits suffix in {basename_no_ext}")
-                        return int(digits_suffix) + 1
-
-                    potential_paths.sort(key=sort_key)
-                    if control_count_per_image is not None and len(potential_paths) < control_count_per_image:
-                        logger.error(
-                            f"Not enough control images for {image_path}: found {len(potential_paths)}, expected {control_count_per_image}"
-                        )
-                        raise ValueError(
-                            f"Not enough control images for {image_path}: found {len(potential_paths)}, expected {control_count_per_image}"
-                        )
-
-                    # take the first `control_count_per_image` paths
-                    self.control_paths[image_path] = (
-                        potential_paths[:control_count_per_image] if control_count_per_image is not None else potential_paths
-                    )
-            logger.info(
-                f"found {len(self.control_paths)} matching control images for {'arbitrary' if control_count_per_image is None else control_count_per_image} images"
-            )
-
-            # log the distribution of number of control images
-            count_of_num_control_images = {}
-            for paths in self.control_paths.values():
-                count = len(paths)
-                if count not in count_of_num_control_images:
-                    count_of_num_control_images[count] = 0
-                count_of_num_control_images[count] += 1
-            for count, num_images in count_of_num_control_images.items():
-                logger.info(f"  {num_images} images have {count} control images")
-
-            missing_controls = len(self.image_paths) - len(self.control_paths)
-            if missing_controls > 0:
-                missing_control_paths = set(self.image_paths) - set(self.control_paths.keys())
-                logger.error(f"Could not find matching control images for {missing_controls} images: {missing_control_paths}")
-                raise ValueError(f"Could not find matching control images for {missing_controls} images")
-
-    def is_indexable(self):
-        return True
-
-    def __len__(self):
-        return len(self.image_paths)
-
-    def get_image_data(self, idx: int) -> tuple[str, Image.Image, str, Optional[Image.Image]]:
-        image_path = self.image_paths[idx]
-        image = Image.open(image_path).convert("RGB")
-
-        _, caption = self.get_caption(idx)
-
-        controls = None
-        if self.has_control:
-            controls = []
-            for control_path in self.control_paths[image_path]:
-                control = Image.open(control_path)
-                if control.mode != "RGB" and control.mode != "RGBA":
-                    control = control.convert("RGB")
-                controls.append(control)
-
-        return image_path, image, caption, controls
-
-    def get_caption(self, idx: int) -> tuple[str, str]:
-        image_path = self.image_paths[idx]
-        caption_path = os.path.splitext(image_path)[0] + self.caption_extension if self.caption_extension else ""
-        with open(caption_path, "r", encoding="utf-8") as f:
-            caption = f.read().strip()
-        return image_path, caption
-
-    def __iter__(self):
-        self.current_idx = 0
-        return self
-
-    def __next__(self) -> callable:
-        """
-        Returns a fetcher function that returns image data.
-        """
-        if self.current_idx >= len(self.image_paths):
-            raise StopIteration
-
-        if self.caption_only:
-
-            def create_caption_fetcher(index):
-                return lambda: self.get_caption(index)
-
-            fetcher = create_caption_fetcher(self.current_idx)
-        else:
-
-            def create_image_fetcher(index):
-                return lambda: self.get_image_data(index)
-
-            fetcher = create_image_fetcher(self.current_idx)
-
-        self.current_idx += 1
-        return fetcher
-
-
-class ImageJsonlDatasource(ImageDatasource):
-    def __init__(self, image_jsonl_file: str, control_count_per_image: Optional[int] = None):
-        super().__init__()
-        self.image_jsonl_file = image_jsonl_file
-        self.control_count_per_image = control_count_per_image
-        self.current_idx = 0
-
-        # load jsonl
-        logger.info(f"load image jsonl from {self.image_jsonl_file}")
-        self.data = []
-        with open(self.image_jsonl_file, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.error(f"failed to load json: {line} @ {self.image_jsonl_file}")
-                    raise
-                self.data.append(data)
-        logger.info(f"loaded {len(self.data)} images")
-
-        # Normalize control paths
-        for item in self.data:
-            if "control_path" in item:
-                item["control_path_0"] = item.pop("control_path")
-
-            # Ensure control paths are named consistently, from control_path_0000 to control_path_0, control_path_1, etc.
-            control_path_keys = [key for key in item.keys() if key.startswith("control_path_")]
-            control_path_keys.sort(key=lambda x: int(x.split("_")[-1]))
-            for i, key in enumerate(control_path_keys):
-                if key != f"control_path_{i}":
-                    item[f"control_path_{i}"] = item.pop(key)
-
-        # Check if there are control paths in the JSONL
-        self.has_control = any("control_path_0" in item for item in self.data)
-        if self.has_control:
-            if self.control_count_per_image is None:
-                logger.info(f"found {len(self.data)} images with arbitrary control images per image in JSONL data")
-            else:
-                missing_control_images = [
-                    item["image_path"]
-                    for item in self.data
-                    if sum(f"control_path_{i}" not in item for i in range(self.control_count_per_image)) > 0
-                ]
-                if missing_control_images:
-                    logger.error(f"Some images do not have control paths in JSONL data: {missing_control_images}")
-                    raise ValueError(f"Some images do not have control paths in JSONL data: {missing_control_images}")
-                logger.info(
-                    f"found {len(self.data)} images with {self.control_count_per_image} control images per image in JSONL data"
-                )
-
-    def is_indexable(self):
-        return True
-
-    def __len__(self):
-        return len(self.data)
-
-    def get_image_data(self, idx: int) -> tuple[str, Image.Image, str, Optional[list[Image.Image]]]:
-        data = self.data[idx]
-        image_path = data["image_path"]
-        image = Image.open(image_path).convert("RGB")
-
-        caption = data["caption"]
-
-        controls = None
-        if self.has_control:
-            controls = []
-            for i in range(self.control_count_per_image or 1000):  # arbitrary large number if control_count_per_image is None
-                if f"control_path_{i}" not in data:
-                    break
-                control_path = data[f"control_path_{i}"]
-                control = Image.open(control_path)
-                if control.mode != "RGB" and control.mode != "RGBA":
-                    control = control.convert("RGB")
-                controls.append(control)
-
-        return image_path, image, caption, controls
-
-    def get_caption(self, idx: int) -> tuple[str, str]:
-        data = self.data[idx]
-        image_path = data["image_path"]
-        caption = data["caption"]
-        return image_path, caption
-
-    def __iter__(self):
-        self.current_idx = 0
-        return self
-
-    def __next__(self) -> callable:
-        if self.current_idx >= len(self.data):
-            raise StopIteration
-
-        if self.caption_only:
-
-            def create_caption_fetcher(index):
-                return lambda: self.get_caption(index)
-
-            fetcher = create_caption_fetcher(self.current_idx)
-
-        else:
-
-            def create_fetcher(index):
-                return lambda: self.get_image_data(index)
-
-            fetcher = create_fetcher(self.current_idx)
-
-        self.current_idx += 1
-        return fetcher
-
-
-class VideoDatasource(ContentDatasource):
-    def __init__(self):
-        super().__init__()
-
-        # None means all frames
-        self.start_frame = None
-        self.end_frame = None
-
-        self.bucket_selector = None
-
-        self.source_fps = None
-        self.target_fps = None
-
-    def __len__(self):
-        raise NotImplementedError
-
-    def get_video_data_from_path(
-        self,
-        video_path: str,
-        start_frame: Optional[int] = None,
-        end_frame: Optional[int] = None,
-        bucket_selector: Optional[BucketSelector] = None,
-    ) -> tuple[str, list[Image.Image], str]:
-        # this method can resize the video if bucket_selector is given to reduce the memory usage
-
-        start_frame = start_frame if start_frame is not None else self.start_frame
-        end_frame = end_frame if end_frame is not None else self.end_frame
-        bucket_selector = bucket_selector if bucket_selector is not None else self.bucket_selector
-
-        video = load_video(
-            video_path, start_frame, end_frame, bucket_selector, source_fps=self.source_fps, target_fps=self.target_fps
-        )
-        return video
-
-    def get_control_data_from_path(
-        self,
-        control_path: str,
-        start_frame: Optional[int] = None,
-        end_frame: Optional[int] = None,
-        bucket_selector: Optional[BucketSelector] = None,
-    ) -> list[Image.Image]:
-        start_frame = start_frame if start_frame is not None else self.start_frame
-        end_frame = end_frame if end_frame is not None else self.end_frame
-        bucket_selector = bucket_selector if bucket_selector is not None else self.bucket_selector
-
-        control = load_video(
-            control_path, start_frame, end_frame, bucket_selector, source_fps=self.source_fps, target_fps=self.target_fps
-        )
-        return control
-
-    def set_start_and_end_frame(self, start_frame: Optional[int], end_frame: Optional[int]):
-        self.start_frame = start_frame
-        self.end_frame = end_frame
-
-    def set_bucket_selector(self, bucket_selector: BucketSelector):
-        self.bucket_selector = bucket_selector
-
-    def set_source_and_target_fps(self, source_fps: Optional[float], target_fps: Optional[float]):
-        self.source_fps = source_fps
-        self.target_fps = target_fps
-
-    def __iter__(self):
-        raise NotImplementedError
-
-    def __next__(self):
-        raise NotImplementedError
-
-
-class VideoDirectoryDatasource(VideoDatasource):
-    def __init__(self, video_directory: str, caption_extension: Optional[str] = None, control_directory: Optional[str] = None):
-        super().__init__()
-        self.video_directory = video_directory
-        self.caption_extension = caption_extension
-        self.control_directory = control_directory  # 新しく追加: コントロール画像ディレクトリ
-        self.current_idx = 0
-
-        # glob videos
-        logger.info(f"glob videos in {self.video_directory}")
-        self.video_paths = glob_videos(self.video_directory)
-        logger.info(f"found {len(self.video_paths)} videos")
-
-        # glob control images if specified
-        if self.control_directory is not None:
-            logger.info(f"glob control videos in {self.control_directory}")
-            self.has_control = True
-            self.control_paths = {}
-            for video_path in self.video_paths:
-                video_basename = os.path.basename(video_path)
-                # construct control path from video path
-                # for example: video_path = "vid/video.mp4" -> control_path = "control/video.mp4"
-                control_path = os.path.join(self.control_directory, video_basename)
-                if os.path.exists(control_path):
-                    self.control_paths[video_path] = control_path
-                else:
-                    # use the same base name for control path
-                    base_name = os.path.splitext(video_basename)[0]
-
-                    # directory with images. for example: video_path = "vid/video.mp4" -> control_path = "control/video"
-                    potential_path = os.path.join(self.control_directory, base_name)  # no extension
-                    if os.path.isdir(potential_path):
-                        self.control_paths[video_path] = potential_path
-                    else:
-                        # another extension for control path
-                        # for example: video_path = "vid/video.mp4" -> control_path = "control/video.mov"
-                        for ext in VIDEO_EXTENSIONS:
-                            potential_path = os.path.join(self.control_directory, base_name + ext)
-                            if os.path.exists(potential_path):
-                                self.control_paths[video_path] = potential_path
-                                break
-
-            logger.info(f"found {len(self.control_paths)} matching control videos/images")
-            # check if all videos have matching control paths, if not, raise an error
-            missing_controls = len(self.video_paths) - len(self.control_paths)
-            if missing_controls > 0:
-                # logger.warning(f"Could not find matching control videos/images for {missing_controls} videos")
-                missing_controls_videos = [video_path for video_path in self.video_paths if video_path not in self.control_paths]
-                logger.error(
-                    f"Could not find matching control videos/images for {missing_controls} videos: {missing_controls_videos}"
-                )
-                raise ValueError(f"Could not find matching control videos/images for {missing_controls} videos")
-
-    def is_indexable(self):
-        return True
-
-    def __len__(self):
-        return len(self.video_paths)
-
-    def get_video_data(
-        self,
-        idx: int,
-        start_frame: Optional[int] = None,
-        end_frame: Optional[int] = None,
-        bucket_selector: Optional[BucketSelector] = None,
-    ) -> tuple[str, list[Image.Image], str, Optional[list[Image.Image]]]:
-        video_path = self.video_paths[idx]
-        video = self.get_video_data_from_path(video_path, start_frame, end_frame, bucket_selector)
-
-        _, caption = self.get_caption(idx)
-
-        control = None
-        if self.control_directory is not None and video_path in self.control_paths:
-            control_path = self.control_paths[video_path]
-            control = self.get_control_data_from_path(control_path, start_frame, end_frame, bucket_selector)
-
-        return video_path, video, caption, control
-
-    def get_caption(self, idx: int) -> tuple[str, str]:
-        video_path = self.video_paths[idx]
-        caption_path = os.path.splitext(video_path)[0] + self.caption_extension if self.caption_extension else ""
-        with open(caption_path, "r", encoding="utf-8") as f:
-            caption = f.read().strip()
-        return video_path, caption
-
-    def __iter__(self):
-        self.current_idx = 0
-        return self
-
-    def __next__(self):
-        if self.current_idx >= len(self.video_paths):
-            raise StopIteration
-
-        if self.caption_only:
-
-            def create_caption_fetcher(index):
-                return lambda: self.get_caption(index)
-
-            fetcher = create_caption_fetcher(self.current_idx)
-
-        else:
-
-            def create_fetcher(index):
-                return lambda: self.get_video_data(index)
-
-            fetcher = create_fetcher(self.current_idx)
-
-        self.current_idx += 1
-        return fetcher
-
-
-class VideoJsonlDatasource(VideoDatasource):
-    def __init__(self, video_jsonl_file: str):
-        super().__init__()
-        self.video_jsonl_file = video_jsonl_file
-        self.current_idx = 0
-
-        # load jsonl
-        logger.info(f"load video jsonl from {self.video_jsonl_file}")
-        self.data = []
-        with open(self.video_jsonl_file, "r", encoding="utf-8") as f:
-            for line in f:
-                data = json.loads(line)
-                self.data.append(data)
-        logger.info(f"loaded {len(self.data)} videos")
-
-        # Check if there are control paths in the JSONL
-        self.has_control = any("control_path" in item for item in self.data)
-        if self.has_control:
-            control_count = sum(1 for item in self.data if "control_path" in item)
-            if control_count < len(self.data):
-                missing_control_videos = [item["video_path"] for item in self.data if "control_path" not in item]
-                logger.error(f"Some videos do not have control paths in JSONL data: {missing_control_videos}")
-                raise ValueError(f"Some videos do not have control paths in JSONL data: {missing_control_videos}")
-            logger.info(f"found {control_count} control videos/images in JSONL data")
-
-    def is_indexable(self):
-        return True
-
-    def __len__(self):
-        return len(self.data)
-
-    def get_video_data(
-        self,
-        idx: int,
-        start_frame: Optional[int] = None,
-        end_frame: Optional[int] = None,
-        bucket_selector: Optional[BucketSelector] = None,
-    ) -> tuple[str, list[Image.Image], str, Optional[list[Image.Image]]]:
-        data = self.data[idx]
-        video_path = data["video_path"]
-        video = self.get_video_data_from_path(video_path, start_frame, end_frame, bucket_selector)
-
-        caption = data["caption"]
-
-        control = None
-        if "control_path" in data and data["control_path"]:
-            control_path = data["control_path"]
-            control = self.get_control_data_from_path(control_path, start_frame, end_frame, bucket_selector)
-
-        return video_path, video, caption, control
-
-    def get_caption(self, idx: int) -> tuple[str, str]:
-        data = self.data[idx]
-        video_path = data["video_path"]
-        caption = data["caption"]
-        return video_path, caption
-
-    def __iter__(self):
-        self.current_idx = 0
-        return self
-
-    def __next__(self):
-        if self.current_idx >= len(self.data):
-            raise StopIteration
-
-        if self.caption_only:
-
-            def create_caption_fetcher(index):
-                return lambda: self.get_caption(index)
-
-            fetcher = create_caption_fetcher(self.current_idx)
-
-        else:
-
-            def create_fetcher(index):
-                return lambda: self.get_video_data(index)
-
-            fetcher = create_fetcher(self.current_idx)
-
-        self.current_idx += 1
-        return fetcher
+# The following classes have been moved to datasources.py but are kept here
+# as a comment reference. They are re-imported above for backward compatibility.
+# - ContentDatasource, ImageDatasource, ImageDirectoryDatasource, ImageJsonlDatasource
+# - VideoDatasource, VideoDirectoryDatasource, VideoJsonlDatasource
 
 
 class BaseDataset(torch.utils.data.Dataset):
@@ -1484,6 +143,9 @@ class BaseDataset(torch.utils.data.Dataset):
         self.seed = None
         self.current_epoch = 0
         self.shared_epoch = None
+        # position in the owning DatasetGroup (stamped by the group), carried by every ItemInfo
+        # so cache scripts can find the dataset an item came from
+        self.dataset_index: Optional[int] = None
 
         if not self.enable_bucket:
             self.bucket_no_upscale = False
@@ -1585,6 +247,7 @@ class BaseDataset(torch.utils.data.Dataset):
                 for future in completed_futures:
                     item_key, caption = future.result()
                     item_info = ItemInfo(item_key, caption, (0, 0), (0, 0))
+                    item_info.dataset_index = self.dataset_index
                     item_info.text_encoder_output_cache_path = self.get_text_encoder_output_cache_path(item_info)
                     data.append(item_info)
 
@@ -1634,13 +297,13 @@ class ImageDataset(BaseDataset):
         image_jsonl_file: Optional[str] = None,
         control_directory: Optional[str] = None,
         cache_directory: Optional[str] = None,
+        multiple_target: bool = False,
         fp_latent_window_size: Optional[int] = 9,
         fp_1f_clean_indices: Optional[list[int]] = None,
         fp_1f_target_index: Optional[int] = None,
         fp_1f_no_post: Optional[bool] = False,
-        flux_kontext_no_resize_control: Optional[bool] = False,
-        qwen_image_edit_no_resize_control: Optional[bool] = False,
-        qwen_image_edit_control_resolution: Optional[Tuple[int, int]] = None,
+        no_resize_control: Optional[bool] = False,
+        control_resolution: Optional[Tuple[int, int]] = None,
         debug_dataset: bool = False,
         architecture: str = "no_default",
     ):
@@ -1658,13 +321,38 @@ class ImageDataset(BaseDataset):
         self.image_directory = image_directory
         self.image_jsonl_file = image_jsonl_file
         self.control_directory = control_directory
+        self.multiple_target = multiple_target
         self.fp_latent_window_size = fp_latent_window_size
         self.fp_1f_clean_indices = fp_1f_clean_indices
         self.fp_1f_target_index = fp_1f_target_index
         self.fp_1f_no_post = fp_1f_no_post
-        self.flux_kontext_no_resize_control = flux_kontext_no_resize_control
-        self.qwen_image_edit_no_resize_control = qwen_image_edit_no_resize_control
-        self.qwen_image_edit_control_resolution = qwen_image_edit_control_resolution
+        self.no_resize_control = no_resize_control
+        self.control_resolution = control_resolution
+
+        if self.architecture == ARCHITECTURE_MINIMAX_H3:
+            # one-frame (image) training: t2va targets (K=0), fl2va editing/inbetween targets with
+            # K>=1 time-annotated control images (fp_1f_clean_indices, 24 fps pixel-frame indices),
+            # or ref2va targets whose control images are untimed references (no indices, any
+            # count within the Ref2VA limits). Whether control data is present is only known after
+            # datasource construction (JSONL control_path), so indices<->controls is validated there.
+            if multiple_target:
+                raise ValueError("MiniMax-H3 image datasets do not support multiple targets")
+            if no_resize_control or control_resolution is not None:
+                raise ValueError(
+                    "MiniMax-H3 image datasets resize control images to the bucket resolution;"
+                    " no_resize_control and control_resolution are not supported"
+                )
+            if fp_1f_clean_indices is not None:
+                if len(fp_1f_clean_indices) < 1:
+                    raise ValueError("MiniMax-H3 fp_1f_clean_indices must have at least one entry")
+                if any(index < 0 for index in fp_1f_clean_indices):
+                    raise ValueError(f"MiniMax-H3 fp_1f_clean_indices must be nonnegative, got {fp_1f_clean_indices}")
+                if fp_1f_target_index is None:
+                    # no silent default: a control index coinciding with the target trains against
+                    # the base model's verbatim anchor-copy prior, so the placement must be chosen
+                    raise ValueError("MiniMax-H3 image datasets with fp_1f_clean_indices require an explicit fp_1f_target_index")
+            if fp_1f_target_index is not None and fp_1f_target_index < 0:
+                raise ValueError(f"MiniMax-H3 fp_1f_target_index must be nonnegative, got {fp_1f_target_index}")
 
         control_count_per_image: Optional[int] = 1
         if self.architecture == ARCHITECTURE_FRAMEPACK or self.architecture == ARCHITECTURE_WAN:
@@ -1672,17 +360,30 @@ class ImageDataset(BaseDataset):
                 control_count_per_image = len(fp_1f_clean_indices)
             else:
                 control_count_per_image = 1
+        elif self.architecture == ARCHITECTURE_MINIMAX_H3:
+            if fp_1f_clean_indices is not None:
+                control_count_per_image = len(fp_1f_clean_indices)  # time-annotated: the indices define the count
+            else:
+                control_count_per_image = None  # untimed references: any count (the Ref2VA limits apply at caching)
         elif self.architecture == ARCHITECTURE_FLUX_KONTEXT:
             control_count_per_image = 1
+        elif (
+            self.architecture == ARCHITECTURE_FLUX_2_DEV
+            or self.architecture == ARCHITECTURE_FLUX_2_KLEIN_4B
+            or self.architecture == ARCHITECTURE_FLUX_2_KLEIN_9B
+        ):
+            control_count_per_image = None  # can be multiple control images
         elif self.architecture == ARCHITECTURE_QWEN_IMAGE_EDIT:
             control_count_per_image = None  # can be multiple control images
+        elif self.architecture == ARCHITECTURE_HIDREAM_O1:
+            control_count_per_image = None  # can be multiple control/reference images
 
         if image_directory is not None:
             self.datasource = ImageDirectoryDatasource(
-                image_directory, caption_extension, control_directory, control_count_per_image
+                image_directory, caption_extension, control_directory, control_count_per_image, multiple_target
             )
         elif image_jsonl_file is not None:
-            self.datasource = ImageJsonlDatasource(image_jsonl_file, control_count_per_image)
+            self.datasource = ImageJsonlDatasource(image_jsonl_file, control_count_per_image, multiple_target)
         else:
             raise ValueError("image_directory or image_jsonl_file must be specified")
 
@@ -1692,6 +393,11 @@ class ImageDataset(BaseDataset):
         self.batch_manager = None
         self.num_train_items = 0
         self.has_control = self.datasource.has_control
+        if self.architecture == ARCHITECTURE_MINIMAX_H3:
+            # JSONL control_path entries surface only after datasource construction; control images
+            # without indices are untimed references, whose task fit the cache scripts check
+            if self.fp_1f_clean_indices is not None and not self.has_control:
+                raise ValueError("MiniMax-H3 fp_1f_clean_indices requires control images (control_directory or control_path)")
 
     def get_metadata(self):
         metadata = super().get_metadata()
@@ -1708,7 +414,7 @@ class ImageDataset(BaseDataset):
         return len(self.datasource) if self.datasource.is_indexable() else None
 
     def retrieve_latent_cache_batches(self, num_workers: int):
-        buckset_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale, self.architecture)
+        bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale, self.architecture)
         executor = ThreadPoolExecutor(max_workers=num_workers)
 
         batches: dict[tuple[int, int], list[ItemInfo]] = {}  # (width, height) -> [ItemInfo]
@@ -1726,11 +432,16 @@ class ImageDataset(BaseDataset):
                         break  # submit batch if possible
 
                 for future in completed_futures:
-                    original_size, item_key, image, caption, controls = future.result()
+                    original_size, item_key, images, caption, controls, datasource_index = future.result()
+                    image = images[0]  # use the first image as the main content
                     bucket_height, bucket_width = image.shape[:2]
                     bucket_reso = (bucket_width, bucket_height)
 
-                    item_info = ItemInfo(item_key, caption, original_size, bucket_reso, content=image)
+                    item_info = ItemInfo(
+                        item_key, caption, original_size, bucket_reso, content=image if len(images) == 1 else images
+                    )
+                    item_info.dataset_index = self.dataset_index
+                    item_info.datasource_index = datasource_index
                     item_info.latent_cache_path = self.get_latent_cache_path(item_info)
 
                     # for VLM, which require image in addition to text, like Qwen-Image-Edit
@@ -1748,19 +459,21 @@ class ImageDataset(BaseDataset):
                             bucket_reso.append(len(self.fp_1f_clean_indices))
                             bucket_reso.append(self.fp_1f_no_post)
                         bucket_reso = tuple(bucket_reso)
+                    elif self.architecture == ARCHITECTURE_MINIMAX_H3 and self.fp_1f_clean_indices is not None:
+                        # split by the control count so items with different K never share a batch
+                        bucket_reso = (*bucket_reso, len(self.fp_1f_clean_indices))
 
                     if controls is not None:
                         item_info.control_content = controls
-                        if (
-                            self.flux_kontext_no_resize_control
-                            or self.qwen_image_edit_no_resize_control
-                            or self.qwen_image_edit_control_resolution is not None
-                        ):
-                            # Add control size to bucket_reso to make different control resolutions to different batch
-                            bucket_reso = list(bucket_reso)
-                            for control in controls:
-                                bucket_reso = bucket_reso + list(control.shape[0:2])
-                            bucket_reso = tuple(bucket_reso)
+                        # Add every control size to bucket_reso so that different control resolutions AND a
+                        # different number of control images go to different batches. Run this whenever control
+                        # data is present (not only for no_resize_control / control_resolution): otherwise items
+                        # with a different control count share a batch and the collator stacks a ragged batch.
+                        # controls is already in index order, so the appended shapes stay index-aligned.
+                        bucket_reso = list(bucket_reso)
+                        for control in controls:
+                            bucket_reso = bucket_reso + list(control.shape[0:2])
+                        bucket_reso = tuple(bucket_reso)
 
                     if bucket_reso not in batches:
                         batches[bucket_reso] = []
@@ -1782,29 +495,40 @@ class ImageDataset(BaseDataset):
 
         for fetch_op in self.datasource:
             # fetch and resize image in a separate thread
-            def fetch_and_resize(op: callable) -> tuple[tuple[int, int], str, Image.Image, str, Optional[Image.Image]]:
-                image_key, image, caption, controls = op()
-                image: Image.Image
+            def fetch_and_resize(op: callable) -> tuple:
+                image_key, images, caption, controls = op()
+                images: list[Image.Image]
+                image: Image.Image = images[0]  # use the first image as the main content
                 image_size = image.size
 
-                bucket_reso = buckset_selector.get_bucket_resolution(image_size)
-                image = resize_image_to_bucket(image, bucket_reso)  # returns np.ndarray
+                bucket_reso = bucket_selector.get_bucket_resolution(image_size)
+                images = [resize_image_to_bucket(img, bucket_reso) for img in images]  # list of np.ndarray
 
                 resized_controls = None
                 if controls is not None:
                     resized_controls = []
-                    if self.flux_kontext_no_resize_control or self.qwen_image_edit_no_resize_control:
+                    if self.no_resize_control:
                         for control in controls:
                             # divisible by bucket reso steps
                             width, height = control.size
-                            width = width - (width % buckset_selector.reso_steps)
-                            height = height - (height % buckset_selector.reso_steps)
+
+                            if self.control_resolution is not None:
+                                # use control resolution as maximum
+                                max_width, max_height = self.control_resolution
+                                if width * height > max_width * max_height:
+                                    width, height = BucketSelector.calculate_bucket_resolution(
+                                        control.size, self.control_resolution, architecture=self.architecture
+                                    )
+                            else:
+                                width = width - (width % bucket_selector.reso_steps)
+                                height = height - (height % bucket_selector.reso_steps)
+
                             resized_control = resize_image_to_bucket(control, (width, height))  # returns np.ndarray
                             resized_controls.append(resized_control)
-                    elif self.qwen_image_edit_control_resolution is not None:
+                    elif self.control_resolution is not None:
                         for control in controls:
                             control_bucket_reso = BucketSelector.calculate_bucket_resolution(
-                                control.size, self.qwen_image_edit_control_resolution, architecture=self.architecture
+                                control.size, self.control_resolution, architecture=self.architecture
                             )
                             resized_control = resize_image_to_bucket(control, control_bucket_reso)
                             resized_controls.append(resized_control)
@@ -1813,7 +537,7 @@ class ImageDataset(BaseDataset):
                             resized_control = resize_image_to_bucket(control, bucket_reso)
                             resized_controls.append(resized_control)
 
-                return image_size, image_key, image, caption, resized_controls
+                return image_size, image_key, images, caption, resized_controls, getattr(op, "datasource_index", None)
 
             future = executor.submit(fetch_and_resize, fetch_op)
             futures.append(future)
@@ -1867,16 +591,24 @@ class ImageDataset(BaseDataset):
                     bucket_reso.append(len(self.fp_1f_clean_indices))
                     bucket_reso.append(self.fp_1f_no_post)
                 bucket_reso = tuple(bucket_reso)
-            if (
-                self.flux_kontext_no_resize_control
-                or self.qwen_image_edit_no_resize_control
-                or self.qwen_image_edit_control_resolution is not None
-            ):
-                # we also need to split the bucket with control resolutions
-                control_key = safetensors_utils.find_key(cache_file, starts_with="latents_control_")  # latents_control_FxHxW_dtype
-                if control_key is not None:
-                    control_shape = control_key.rsplit("_", 3)[-2]  # FxHxW
-                    bucket_reso = tuple(list(bucket_reso) + [control_shape])  # (int, int, str)
+            elif self.architecture == ARCHITECTURE_MINIMAX_H3 and self.fp_1f_clean_indices is not None:
+                # split by the control count so items with different K never share a batch (K is
+                # uniform per dataset, so the dataset-level setting is authoritative; a stale cache
+                # with the wrong condition keys fails in the trainer with a re-cache hint)
+                bucket_reso = (*bucket_reso, len(self.fp_1f_clean_indices))
+            # Split the bucket by control latents so that every item in a batch has the same number of
+            # control images AND matching per-control shapes. The collator stacks latents_control_{i}
+            # across the batch (see BucketBatchManager.__getitem__), so a count or shape mismatch produces
+            # a ragged stack (crash) or silently misaligns controls between samples. This must run whenever
+            # control data is present, not only for no_resize_control / control_resolution: even controls
+            # resized to the bucket resolution share that resolution but can still differ in *count*.
+            # find_keys returns the keys sorted, so the per-control order (and the index<->shape pairing,
+            # which remove_dtype_suffix keeps in each element) is deterministic across cache files.
+            control_keys = safetensors_utils.find_keys(cache_file, starts_with="latents_control_")
+            if control_keys:
+                # key: latents_control_{i}_FxHxW_dtype -> "latents_control_{i}_FxHxW" (index + shape)
+                control_shapes = [remove_dtype_suffix(key) for key in control_keys]
+                bucket_reso = tuple(list(bucket_reso) + control_shapes)
 
             item_info = ItemInfo(item_key, "", image_size, bucket_reso, latent_cache_path=cache_file)
             item_info.text_encoder_output_cache_path = text_encoder_output_cache_file
@@ -1913,6 +645,7 @@ class VideoDataset(BaseDataset):
     TARGET_FPS_FRAMEPACK = 30.0
     TARGET_FPS_FLUX_KONTEXT = 1.0  # VideoDataset is not used for Flux Kontext, but this is a placeholder
     TARGET_FPS_HUNYUAN_VIDEO_1_5 = 24.0
+    TARGET_FPS_MINIMAX_H3 = 24.0
 
     def __init__(
         self,
@@ -1935,6 +668,7 @@ class VideoDataset(BaseDataset):
         fp_latent_window_size: Optional[int] = 9,
         debug_dataset: bool = False,
         architecture: str = "no_default",
+        audio_spec: Optional["AudioSpec"] = None,
     ):
         super(VideoDataset, self).__init__(
             resolution,
@@ -1957,6 +691,8 @@ class VideoDataset(BaseDataset):
         self.source_fps = source_fps
         self.fp_latent_window_size = fp_latent_window_size
 
+        self.vae_frame_stride = 4  # legacy frame-grid fallback; architecture-specific helpers may override the formula
+        self.strict_target_fps = False  # timestamp-based fps normalization (required for AV alignment)
         if self.architecture == ARCHITECTURE_HUNYUAN_VIDEO:
             self.target_fps = VideoDataset.TARGET_FPS_HUNYUAN
         elif self.architecture == ARCHITECTURE_WAN:
@@ -1969,17 +705,32 @@ class VideoDataset(BaseDataset):
             self.target_fps = VideoDataset.TARGET_FPS_HUNYUAN
         elif self.architecture == ARCHITECTURE_HUNYUAN_VIDEO_1_5:
             self.target_fps = VideoDataset.TARGET_FPS_HUNYUAN_VIDEO_1_5
+        elif self.architecture == ARCHITECTURE_MINIMAX_H3:
+            self.target_fps = VideoDataset.TARGET_FPS_MINIMAX_H3
+            self.strict_target_fps = True
         else:
             raise ValueError(f"Unsupported architecture: {self.architecture}")
+
+        self.audio_spec = audio_spec
+        self.audio_fps: Optional[int] = None
+        if audio_spec is not None:
+            audio_fps = int(round(self.target_fps))
+            if abs(self.target_fps - audio_fps) > 1e-9:
+                raise ValueError(f"Audio-capable datasets require an integer target fps, got {self.target_fps}")
+            self.audio_fps = audio_fps
+        if self.strict_target_fps and source_fps is not None:
+            logger.warning(
+                f"source_fps={source_fps} is ignored: architecture {self.architecture} always resamples to "
+                f"{self.target_fps} fps using frame timestamps"
+            )
 
         if target_frames is not None:
             target_frames = list(set(target_frames))
             target_frames.sort()
 
-            # round each value to N*4+1
-            rounded_target_frames = [(f - 1) // 4 * 4 + 1 for f in target_frames]
-            rouneded_target_frames = list(set(rounded_target_frames))
-            rouneded_target_frames.sort()
+            rounded_target_frames = [round_down_frame_count(f, self.architecture, self.vae_frame_stride) for f in target_frames]
+            rounded_target_frames = list(set(rounded_target_frames))
+            rounded_target_frames.sort()
 
             # if value is changed, warn
             if target_frames != rounded_target_frames:
@@ -1993,6 +744,11 @@ class VideoDataset(BaseDataset):
             self.datasource = VideoDirectoryDatasource(video_directory, caption_extension, control_directory)
         elif video_jsonl_file is not None:
             self.datasource = VideoJsonlDatasource(video_jsonl_file)
+
+        if self.strict_target_fps:
+            self.datasource.set_strict_target_fps(self.target_fps)
+        if self.audio_spec is not None:
+            self.datasource.set_audio_spec(self.audio_spec)
 
         if self.frame_extraction == "uniform" and self.frame_sample == 1:
             self.frame_extraction = "head"
@@ -2026,8 +782,8 @@ class VideoDataset(BaseDataset):
         return metadata
 
     def retrieve_latent_cache_batches(self, num_workers: int):
-        buckset_selector = BucketSelector(self.resolution, architecture=self.architecture)
-        self.datasource.set_bucket_selector(buckset_selector)
+        bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale, self.architecture)
+        self.datasource.set_bucket_selector(bucket_selector)
         if self.source_fps is not None:
             self.datasource.set_source_and_target_fps(self.source_fps, self.target_fps)
         else:
@@ -2050,7 +806,7 @@ class VideoDataset(BaseDataset):
                         break  # submit batch if possible
 
                 for future in completed_futures:
-                    original_frame_size, video_key, video, caption, control = future.result()
+                    original_frame_size, video_key, video, caption, control, waveform, datasource_index = future.result()
 
                     frame_count = len(video)
                     video = np.stack(video, axis=0)
@@ -2096,7 +852,7 @@ class VideoDataset(BaseDataset):
                     elif self.frame_extraction == "full":
                         # select all frames
                         target_frame = min(frame_count, self.max_frames)
-                        target_frame = (target_frame - 1) // 4 * 4 + 1  # round to N*4+1
+                        target_frame = round_down_frame_count(target_frame, self.architecture, self.vae_frame_stride)
                         crop_pos_and_frames.append((0, target_frame))
                     else:
                         raise ValueError(f"frame_extraction {self.frame_extraction} is not supported")
@@ -2120,8 +876,29 @@ class VideoDataset(BaseDataset):
                             item_key, caption, original_frame_size, batch_key, frame_count=target_frame, content=cropped_video
                         )
                         item_info.latent_cache_path = self.get_latent_cache_path(item_info)
+                        if self.architecture == ARCHITECTURE_MINIMAX_H3:
+                            item_info.text_encoder_output_cache_path = self.get_text_encoder_output_cache_path(item_info)
                         item_info.control_content = cropped_control  # None is allowed
                         item_info.fp_latent_window_size = self.fp_latent_window_size
+                        item_info.dataset_index = self.dataset_index
+                        item_info.datasource_index = datasource_index
+                        item_info.frame_pos = int(crop_pos)
+
+                        if self.audio_spec is not None:
+                            sample_count = self.audio_spec.samples_per_crop(target_frame)
+                            if waveform is None:
+                                item_info.audio_content = torch.zeros(self.audio_spec.channels, sample_count, dtype=torch.float32)
+                                item_info.audio_present = False
+                            else:
+                                start_sample = audio_window_start(crop_pos, self.audio_fps, self.audio_spec.sample_rate)
+                                item_info.audio_content = slice_audio_window(
+                                    waveform,
+                                    start_sample=start_sample,
+                                    sample_count=sample_count,
+                                    pad_tolerance=self.audio_spec.codec_pad_tolerance,
+                                    context=video_key,
+                                )
+                                item_info.audio_present = True
 
                         batch = batches.get(batch_key, [])
                         batch.append(item_info)
@@ -2142,27 +919,30 @@ class VideoDataset(BaseDataset):
 
         for operator in self.datasource:
 
-            def fetch_and_resize(op: callable) -> tuple[tuple[int, int], str, list[np.ndarray], str, Optional[list[np.ndarray]]]:
+            def fetch_and_resize(op: callable) -> tuple:
                 result = op()
 
+                waveform = None
                 if len(result) == 3:  # for backward compatibility TODO remove this in the future
                     video_key, video, caption = result
                     control = None
-                else:
+                elif len(result) == 4:
                     video_key, video, caption, control = result
+                else:  # audio-enabled datasource
+                    video_key, video, caption, control, waveform = result
 
                 video: list[np.ndarray]
                 frame_size = (video[0].shape[1], video[0].shape[0])
 
                 # resize if necessary
-                bucket_reso = buckset_selector.get_bucket_resolution(frame_size)
+                bucket_reso = bucket_selector.get_bucket_resolution(frame_size)
                 video = [resize_image_to_bucket(frame, bucket_reso) for frame in video]
 
                 # resize control if necessary
                 if control is not None:
                     control = [resize_image_to_bucket(frame, bucket_reso) for frame in control]
 
-                return frame_size, video_key, video, caption, control
+                return frame_size, video_key, video, caption, control, waveform, getattr(op, "datasource_index", None)
 
             future = executor.submit(fetch_and_resize, operator)
             futures.append(future)
@@ -2204,7 +984,13 @@ class VideoDataset(BaseDataset):
             frame_pos, frame_count = int(frame_pos), int(frame_count)
 
             item_key = "_".join(tokens[:-3])
-            text_encoder_output_cache_file = os.path.join(self.cache_directory, f"{item_key}_{self.architecture}_te.safetensors")
+            if self.architecture == ARCHITECTURE_MINIMAX_H3:
+                text_item_key = f"{item_key}_{tokens[-3]}"
+            else:
+                text_item_key = item_key
+            text_encoder_output_cache_file = os.path.join(
+                self.cache_directory, f"{text_item_key}_{self.architecture}_te.safetensors"
+            )
             if not os.path.exists(text_encoder_output_cache_file):
                 logger.warning(f"Text encoder output cache file not found: {text_encoder_output_cache_file}")
                 continue
@@ -2245,7 +1031,8 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
         super().__init__(datasets)
         self.datasets: list[Union[ImageDataset, VideoDataset]] = datasets
         self.num_train_items = 0
-        for dataset in self.datasets:
+        for index, dataset in enumerate(self.datasets):
+            dataset.dataset_index = index
             self.num_train_items += dataset.num_train_items
 
     def set_current_epoch(self, epoch):

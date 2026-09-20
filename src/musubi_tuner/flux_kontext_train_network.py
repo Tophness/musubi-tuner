@@ -10,6 +10,7 @@ from accelerate import Accelerator
 from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_FLUX_KONTEXT, ARCHITECTURE_FLUX_KONTEXT_FULL
 from musubi_tuner.flux import flux_models, flux_utils
 from musubi_tuner.hv_train_network import (
+    DiTOutput,
     NetworkTrainer,
     load_prompts,
     clean_memory_on_device,
@@ -41,11 +42,6 @@ class FluxKontextNetworkTrainer(NetworkTrainer):
 
     def handle_model_specific_args(self, args):
         self.dit_dtype = torch.float16 if args.mixed_precision == "fp16" else torch.bfloat16
-        if not args.split_attn:
-            logger.info(
-                "Split attention will be automatically enabled if the control images are not resized to the same size as the target image."
-                + " / 制御画像がターゲット画像と同じサイズにリサイズされていない場合、分割アテンションが自動的に有効になります。"
-            )
         self._i2v_training = False
         self._control_training = False  # this means video training, not control image training
         self.default_guidance_scale = 2.5  # embeded guidance scale for inference
@@ -303,7 +299,8 @@ class FluxKontextNetworkTrainer(NetworkTrainer):
         noisy_model_input: torch.Tensor,
         timesteps: torch.Tensor,
         network_dtype: torch.dtype,
-    ):
+        **kwargs,
+    ) -> DiTOutput:
         model: flux_models.Flux = transformer
 
         bsize = latents.shape[0]
@@ -372,7 +369,7 @@ class FluxKontextNetworkTrainer(NetworkTrainer):
         # flow matching loss
         target = noise - latents
 
-        return model_pred, target
+        return DiTOutput(pred=model_pred, target=target)
 
     # endregion model specific
 

@@ -14,6 +14,8 @@ from typing import List, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 if TYPE_CHECKING:
     from multiprocessing.sharedctypes import Synchronized
 
+    from musubi_tuner.dataset.audio_utils import AudioSpec
+
 SharedEpoch = Optional["Synchronized[int]"]
 
 
@@ -47,15 +49,16 @@ class ImageDatasetParams(BaseDatasetParams):
     image_directory: Optional[str] = None
     image_jsonl_file: Optional[str] = None
     control_directory: Optional[str] = None
+    multiple_target: Optional[bool] = False
 
     # FramePack dependent parameters
     fp_latent_window_size: Optional[int] = 9
     fp_1f_clean_indices: Optional[Sequence[int]] = None
     fp_1f_target_index: Optional[int] = None
     fp_1f_no_post: Optional[bool] = False
-    flux_kontext_no_resize_control: Optional[bool] = False  # if True, control images are not resized to target resolution
-    qwen_image_edit_no_resize_control: Optional[bool] = False  # if True, control images are not resized to target resolution
-    qwen_image_edit_control_resolution: Optional[Tuple[int, int]] = None  # if set, control images are resized to this resolution
+
+    no_resize_control: Optional[bool] = False  # if True, control images are not resized to target resolution
+    control_resolution: Optional[Tuple[int, int]] = None  # if set, control images are resized to this resolution
 
 
 @dataclass
@@ -121,13 +124,13 @@ class ConfigSanitizer:
         "image_jsonl_file": str,
         "cache_directory": str,
         "control_directory": str,
+        "multiple_target": bool,
         "fp_latent_window_size": int,
         "fp_1f_clean_indices": [int],
         "fp_1f_target_index": int,
         "fp_1f_no_post": bool,
-        "flux_kontext_no_resize_control": bool,
-        "qwen_image_edit_no_resize_control": bool,
-        "qwen_image_edit_control_resolution": functools.partial(__validate_and_convert_scalar_or_twodim.__func__, int),
+        "no_resize_control": bool,
+        "control_resolution": functools.partial(__validate_and_convert_scalar_or_twodim.__func__, int),
     }
     VIDEO_DATASET_DISTINCT_SCHEMA = {
         "video_directory": str,
@@ -264,11 +267,13 @@ class BlueprintGenerator:
 
 
 # if training is True, it will return a dataset group for training, otherwise for caching
+# audio_spec: audio-capable architectures pass their AudioSpec here to enable audio for video datasets
 def generate_dataset_group_by_blueprint(
     dataset_group_blueprint: DatasetGroupBlueprint,
     training: bool = False,
     num_timestep_buckets: Optional[int] = None,
     shared_epoch: SharedEpoch = None,
+    audio_spec: Optional["AudioSpec"] = None,
 ) -> DatasetGroup:
     datasets: List[Union[ImageDataset, VideoDataset]] = []
 
@@ -278,7 +283,10 @@ def generate_dataset_group_by_blueprint(
         else:
             dataset_klass = VideoDataset
 
-        dataset = dataset_klass(**asdict(dataset_blueprint.params))
+        dataset_params = asdict(dataset_blueprint.params)
+        if not dataset_blueprint.is_image_dataset and audio_spec is not None:
+            dataset_params["audio_spec"] = audio_spec
+        dataset = dataset_klass(**dataset_params)
         datasets.append(dataset)
 
     # assertion
@@ -315,13 +323,14 @@ def generate_dataset_group_by_blueprint(
                     f"""\
         image_directory: "{dataset.image_directory}"
         image_jsonl_file: "{dataset.image_jsonl_file}"
+        control_directory: "{dataset.control_directory}"
+        multiple_target: {dataset.multiple_target}
         fp_latent_window_size: {dataset.fp_latent_window_size}
         fp_1f_clean_indices: {dataset.fp_1f_clean_indices}
         fp_1f_target_index: {dataset.fp_1f_target_index}
         fp_1f_no_post: {dataset.fp_1f_no_post}
-        flux_kontext_no_resize_control: {dataset.flux_kontext_no_resize_control}
-        qwen_image_edit_no_resize_control: {dataset.qwen_image_edit_no_resize_control}
-        qwen_image_edit_control_resolution: {dataset.qwen_image_edit_control_resolution}
+        no_resize_control: {dataset.no_resize_control}
+        control_resolution: {dataset.control_resolution}
     \n"""
                 ),
                 "    ",
@@ -382,6 +391,35 @@ def load_user_config(file: str) -> dict:
             raise
     else:
         raise ValueError(f"not supported config file format / 対応していない設定ファイルの形式です: {file}")
+
+    deprecated_key_map = {
+        "flux_kontext_no_resize_control": "no_resize_control",
+        "qwen_image_edit_no_resize_control": "no_resize_control",
+        "qwen_image_edit_control_resolution": "control_resolution",
+    }
+
+    def normalize_deprecated_keys(section: dict, section_name: str) -> None:
+        for old_key, new_key in deprecated_key_map.items():
+            if old_key not in section:
+                continue
+            if new_key in section:
+                logger.warning(
+                    f"Deprecated config key '{old_key}' is ignored because '{new_key}' is already set in {section_name}."
+                )
+            else:
+                section[new_key] = section[old_key]
+                logger.warning(f"Deprecated config key '{old_key}' found in {section_name}; use '{new_key}' instead.")
+            del section[old_key]
+
+    general_config = config.get("general")
+    if isinstance(general_config, dict):
+        normalize_deprecated_keys(general_config, "general")
+
+    datasets_config = config.get("datasets", [])
+    if isinstance(datasets_config, list):
+        for idx, dataset_config in enumerate(datasets_config):
+            if isinstance(dataset_config, dict):
+                normalize_deprecated_keys(dataset_config, f"datasets[{idx}]")
 
     return config
 

@@ -39,16 +39,31 @@ bucket_no_upscale = false
 image_directory = "/path/to/image_dir"
 cache_directory = "/path/to/cache_directory"
 num_repeats = 1 # optional, default is 1. Number of times to repeat the dataset. Useful to balance the multiple datasets with different sizes.
+# multiple_target = true # optional, default is false. Set to true for Qwen-Image-Layered training.
 
 # other datasets can be added here. each dataset can have different configurations
 ```
+
+`image_directory` is the directory containing images. The captions are stored in text files with the same filename as the image, but with the extension specified by `caption_extension` (for example, `image1.jpg` and `image1.txt`).
 
 `cache_directory` is optional, default is None to use the same directory as the image directory. However, we recommend to set the cache directory to avoid accidental sharing of the cache files between different datasets.
 
 `num_repeats` is also available. It is optional, default is 1 (no repeat). It repeats the images (or videos) that many times to expand the dataset. For example, if `num_repeats = 2` and there are 20 images in the dataset, each image will be duplicated twice (with the same caption) to have a total of 40 images. It is useful to balance the multiple datasets with different sizes.
 
+For Qwen-Image-Layered training, set `multiple_target = true`. Also, in the `image_directory`, for each "image to be trained + segmentation (layer) results" combination, store the following (if `caption_extension` is `.txt`):
+
+|Item|Example|Note|
+|---|---|---|
+|Caption file|`image1.txt`| |
+|Image to be trained (image to be layered)|`image1.png`| |
+|Segmentation (layer) result images|`image1_1.png`, `image1_2.png`, ...|Alpha channel required|
+
+The next combination would be stored as `/path/to/layer_images/image2.txt` for caption, and `/path/to/layer_images/image2.png`, `/path/to/layer_images/image2_0.png`, `/path/to/layer_images/image2_1.png` for images.
+
 <details>
 <summary>日本語</summary>
+
+`image_directory`は画像を含むディレクトリのパスです。キャプションは、画像と同じファイル名で、`caption_extension`で指定した拡張子のテキストファイルに格納してください（例：`image1.jpg`と`image1.txt`）。
 
 `cache_directory` はオプションです。デフォルトは画像ディレクトリと同じディレクトリに設定されます。ただし、異なるデータセット間でキャッシュファイルが共有されるのを防ぐために、明示的に別のキャッシュディレクトリを設定することをお勧めします。
 
@@ -57,6 +72,17 @@ num_repeats = 1 # optional, default is 1. Number of times to repeat the dataset.
 resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale は general または datasets のどちらかに設定してください。省略時は各項目のデフォルト値が使用されます。
 
 `[[datasets]]`以下を追加することで、他のデータセットを追加できます。各データセットには異なる設定を持てます。
+
+Qwen-Image-Layeredの学習の場合、`multiple_target = true`を設定してください。また、`image_directory`内に、それぞれの「学習する画像＋分割結果」組み合わせごとに、以下を格納してください（`caption_extension`が`.txt`の場合）。
+
+|項目|例|備考|
+|---|---|---|
+|キャプションファイル|`image1.txt`| |
+|学習する画像（分割対象の画像）|`image1.png`| |
+|分割結果のレイヤー画像群|`image1_1.png`, `image1_2.png`, ...|アルファチャンネル必須|
+
+次の組み合わせは、`/path/to/layer_images/image2.txt`に対して、`/path/to/layer_images/image2.png`, `/path/to/layer_images/image2_0.png`, `/path/to/layer_images/image2_1.png`のように格納します。
+
 </details>
 
 ### Sample for Image Dataset with Metadata JSONL File
@@ -77,6 +103,7 @@ bucket_no_upscale = false
 image_jsonl_file = "/path/to/metadata.jsonl"
 cache_directory = "/path/to/cache_directory" # required for metadata jsonl file
 num_repeats = 1 # optional, default is 1. Same as above.
+# multiple_target = true # optional, default is false. Set to true for Qwen-Image-Layered training. 
 
 # other datasets can be added here. each dataset can have different configurations
 ```
@@ -88,6 +115,15 @@ JSONL file format for metadata:
 {"image_path": "/path/to/image2.jpg", "caption": "A caption for image2"}
 ```
 
+For Qwen-Image-Layered training, set `multiple_target = true`. Also, in the metadata JSONL file, for each "image to be trained + segmentation (layer) results" combination, specify the image paths with numbered attributes like `image_path_0`, `image_path_1`, etc.
+
+```json
+{"image_path_0": "/path/to/image1_base.png", "image_path_1": "/path/to/image1_layer1.png", "image_path_2": "/path/to/image1_layer2.png", "caption": "A caption for image1"}
+{"image_path_0": "/path/to/image2_base.png", "image_path_1": "/path/to/image2_layer1.png", "image_path_2": "/path/to/image2_layer2.png", "caption": "A caption for image2"}
+```
+
+Keys outside the shared schema (`image_path`, `caption`, `control_path` and their numbered variants) are passed through to the architecture-specific cache scripts as per-item extras; for example, MiniMax-H3 reads its `references` and `teacher_caption` from them. Architectures that do not define such fields ignore them. Directory-based datasets cannot carry per-item extras.
+
 <details>
 <summary>日本語</summary>
 
@@ -95,7 +131,12 @@ resolution, batch_size, num_repeats, enable_bucket, bucket_no_upscale は genera
 
 metadata jsonl ファイルを使用する場合、caption_extension は必要ありません。また、cache_directory は必須です。
 
+共通スキーマ以外のキー（`image_path`、`caption`、`control_path` と、それらの番号付きの派生キー以外）は、アーキテクチャ固有のキャッシュスクリプトに項目ごとの追加フィールドとして渡されます。たとえば MiniMax-H3 は `references` と `teacher_caption` をここから読みます。該当フィールドを定義しないアーキテクチャでは無視されます。ディレクトリ指定のデータセットは項目ごとの追加フィールドを持てません。
+
 キャプションによるデータセットと同様に、複数のデータセットを追加できます。各データセットには異なる設定を持てます。
+
+Qwen-Image-Layeredの学習の場合、`multiple_target = true`を設定してください。また、metadata jsonl ファイル内で、各画像に対して複数のターゲット画像を指定する場合は、`image_path_0`, `image_path_1`のように数字を付与してください。
+
 </details>
 
 
@@ -131,6 +172,8 @@ max_frames = 45
 # other datasets can be added here. each dataset can have different configurations
 ```
 
+`video_directory` is the directory containing videos. The captions are stored in text files with the same filename as the video, but with the extension specified by `caption_extension` (for example, `video1.mp4` and `video1.txt`).
+
 __In HunyuanVideo and Wan2.1, the number of `target_frames` must be "N\*4+1" (N=0,1,2,...).__ Otherwise, it will be truncated to the nearest "N*4+1".
 
 In FramePack, it is recommended to set `frame_extraction` to `full` and `max_frames` to a sufficiently large value, as it can handle longer videos. However, if the video is too long, an Out of Memory error may occur during VAE encoding. The videos in FramePack are trimmed to "N * latent_window_size * 4 + 1" frames (for example, 37, 73, 109... if `latent_window_size` is 9).
@@ -144,6 +187,8 @@ If `source_fps` is not specified (default), all frames of the video will be used
 
 共通パラメータ（resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale）は、generalまたはdatasetsのいずれかに設定できます。
 動画固有のパラメータ（target_frames, frame_extraction, frame_stride, frame_sample, max_frames, source_fps）は、各datasetsセクションに設定する必要があります。
+
+`video_directory`は動画を含むディレクトリのパスです。キャプションは、動画と同じファイル名で、`caption_extension`で指定した拡張子のテキストファイルに格納してください（例：`video1.mp4`と`video1.txt`）。
 
 __HunyuanVideoおよびWan2.1では、target_framesの数値は「N\*4+1」である必要があります。__ これ以外の値の場合は、最も近いN\*4+1の値に切り捨てられます。
 
@@ -199,11 +244,23 @@ JSONL file format for metadata:
 
 `video_path` can be a directory containing multiple images.
 
+Relative paths in the JSONL (`video_path`, `control_path`, `audio_path`) are resolved against the working directory first (the historical behavior); when the file is not found there, they are resolved against the directory containing the JSONL file. If both locations contain the file, the working-directory match is used and a warning is logged.
+
+For audio-capable architectures, each record may also have an optional `audio_path` field pointing to the audio file for the video. If `audio_path` is omitted, the audio source is resolved automatically: a same-stem audio sidecar file (e.g. `video1.wav` next to `video1.mp4`; `.aac`/`.flac`/`.m4a`/`.mp3`/`.ogg`/`.opus`/`.wav`) is used if present (multiple candidates are an error), otherwise the audio track embedded in the video container is used. If none is found, the item is cached as audio-less (a silence placeholder with `audio_present=0`, excluded from audio supervision during training). Architectures without audio support ignore `audio_path`.
+
+Keys outside the shared schema (`video_path`, `caption`, `control_path`, `audio_path`) are passed through to the architecture-specific cache scripts as per-item extras; for example, MiniMax-H3 reads its `references` and `teacher_caption` from them (relative paths inside such fields resolve from the JSONL directory). Architectures that do not define such fields ignore them. Directory-based datasets cannot carry per-item extras.
+
 <details>
 <summary>日本語</summary>
 metadata jsonl ファイルを使用する場合、caption_extension は必要ありません。また、cache_directory は必須です。
 
 `video_path`は、複数の画像を含むディレクトリのパスでも構いません。
+
+JSONL 内の相対パス（`video_path`、`control_path`、`audio_path`）は、まず作業ディレクトリ基準で解決されます（従来どおりの挙動）。そこにファイルが存在しない場合は、JSONL ファイルのあるディレクトリ基準で解決されます。両方に存在する場合は作業ディレクトリ側が使用され、warning が出力されます。
+
+audio 対応アーキテクチャでは、各レコードに任意の `audio_path` フィールドを指定できます。省略した場合は、同名の音声サイドカーファイル（例: `video1.mp4` と同じ場所の `video1.wav`。複数候補がある場合はエラー）、次に動画コンテナ内の音声トラックの順で自動解決されます。どちらも無い場合は音声なしとしてキャッシュされ（無音プレースホルダ、`audio_present=0`）、学習時の audio 教師からは除外されます。audio 非対応のアーキテクチャでは `audio_path` は無視されます。
+
+共通スキーマ以外のキー（`video_path`、`caption`、`control_path`、`audio_path` 以外）は、アーキテクチャ固有のキャッシュスクリプトに項目ごとの追加フィールドとして渡されます。たとえば MiniMax-H3 は `references` と `teacher_caption` をここから読みます（こうしたフィールド内の相対パスは JSONL のディレクトリ基準で解決されます）。該当フィールドを定義しないアーキテクチャでは無視されます。ディレクトリ指定のデータセットは項目ごとの追加フィールドを持てません。
 
 他の注意事項は今までのデータセットと同様です。
 </details>
@@ -291,7 +348,7 @@ video3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (trimmed to 31 frames)
 
 ### Sample for Image Dataset with Control Images
 
-The dataset with control images. This is used for training the one frame training for FramePack, FLUX.1 Kontext training, and Qwen-Image-Edit training.
+The dataset with control images. This is used for the one frame training for FramePack, or for FLUX.1 Kontext, FLUX.2 and Qwen-Image-Edit training.
 
 The dataset configuration with caption text files is similar to the image dataset, but with an additional `control_directory` parameter.
 
@@ -317,7 +374,7 @@ The control images can also have an alpha channel. In this case, the alpha chann
 <details>
 <summary>日本語</summary>
 
-制御画像を持つデータセットです。現時点ではFramePackの単一フレーム学習、FLUX.1 Kontext学習、Qwen-Image-Edit学習に使用します。
+制御画像を持つデータセットです。現時点ではFramePackの単一フレーム学習、FLUX.1 Kontext、FLUX.2、Qwen-Image-Editの学習に使用します。
 
 キャプションファイルを用いる場合は`control_directory`を追加で指定してください。制御画像は、画像と同じファイル名（または拡張子のみが異なるファイル名）の、`control_directory`にある画像が使用されます（例：`image_dir/image1.jpg`と`control_dir/image1.png`）。`image_directory`の画像は学習対象の画像（推論時に生成する画像、変化後の画像）としてください。`control_directory`には推論時の開始画像を格納してください。キャプションは`image_directory`へ格納してください。
 
@@ -326,6 +383,61 @@ The control images can also have an alpha channel. In this case, the alpha chann
 メタデータJSONLファイルを使用する場合は、`control_path`を追加してください。複数枚の制御画像を指定する場合は、`control_path_0`, `control_path_1`のように数字を付与してください。
 
 FramePackの単一フレーム学習では、制御画像はアルファチャンネルを持つこともできます。この場合、画像のアルファチャンネルはlatentへのマスクとして使用されます。
+
+</details>
+
+### Resizing Control Images for Image Dataset / 画像データセットでの制御画像のリサイズ
+
+By default, the control images are resized to the same size as the target images. You can change the resizing method with the following options:
+
+- `no_resize_control`: Do not resize the control images. They will be cropped to match the rounding unit of each architecture (for example, 16 pixels).
+- `control_resolution`: Resize the control images to the specified resolution. For example, specify `control_resolution = [1024, 1024]`. Aspect Ratio Bucketing will be applied.
+
+```toml
+[[datasets]]
+# Image directory or metadata jsonl file as above
+image_directory = "/path/to/image_dir"
+control_directory = "/path/to/control_dir"
+control_resolution = [1024, 1024]
+no_resize_control = false
+```
+
+If both are specified, `control_resolution` is treated as the maximum resolution. That is, if the total number of pixels of the control image exceeds that of `control_resolution`, it will be resized to `control_resolution`.
+
+The recommended resizing method for control images may vary depending on the architecture. Please refer to the section for each architecture.
+
+The previous options `flux_kontext_no_resize_control` and `qwen_image_edit_no_resize_control` are still available, but it is recommended to use `no_resize_control`.
+
+The `qwen_image_edit_control_resolution` is also available, but it is recommended to use `control_resolution`.
+
+
+**The technical details of `no_resize_control`:**
+
+When this option is specified, the control image is trimmed to a multiple of 16 pixels (depending on the architecture) and converted to latent and passed to the model.
+
+Each element in the batch must have the same resolution, which is adjusted by advanced Aspect Ratio Bucketing (buckets are divided by the resolution of the target image and also the resolution of the control image).
+
+<details>
+<summary>日本語</summary>
+
+デフォルトでは、制御画像はターゲット画像と同じサイズにリサイズされます。以下のオプションで、リサイズ方式を変更できます。
+
+- `no_resize_control`: 制御画像をリサイズしません。アーキテクチャごとの丸め単位（16ピクセルなど）に合わせてトリミングされます。
+- `control_resolution`: 制御画像を指定した解像度にリサイズします。例えば、`control_resolution = [1024, 1024]`と指定します。Aspect Ratio Bucketingが適用されます。
+
+両方が同時に指定されると、`control_resolution`は最大解像度として扱われます。つまり、制御画像の総ピクセル数が`control_resolution`の総ピクセル数を超える場合、`control_resolution`にリサイズされます。
+
+アーキテクチャにより、推奨の制御画像のリサイズ方法は異なります。各アーキテクチャの節を参照してください。
+
+以前のオプション`flux_kontext_no_resize_control`と`qwen_image_edit_no_resize_control`は使用可能ですが、`no_resize_control`を使用することを推奨します。
+
+`qwen_image_edit_control_resolution`も使用可能ですが、`control_resolution`を使用することを推奨します。
+
+**`no_resize_control`の技術的な詳細:**
+
+このオプションが指定された場合、制御画像は16ピクセルの倍数（アーキテクチャに依存）にトリミングされ、latentに変換されてモデルに渡されます。
+
+バッチ内の各要素は同じ解像度である必要がありますが、ターゲット画像の解像度と制御画像の解像度の両方でバケットが分割される高度なAspect Ratio Bucketingによって調整されます。
 
 </details>
 
@@ -462,37 +574,22 @@ kisekaeichiの学習を行う場合は、`fp_1f_clean_indices`に `[0, 10]`を�
 
 The FLUX.1 Kontext dataset configuration uses an image dataset with control images. However, only one control image can be used.
 
-If you set `flux_kontext_no_resize_control`, it disables resizing of the control image. By default, the control image is resized to the same resolution as the image.
-
-```toml
-[[datasets]]
-flux_kontext_no_resize_control = false # optional, default is false. Disable resizing of control image
-```
-
 `fp_1f_*` settings are not used in FLUX.1 Kontext. Masks are also not used.
 
-The technical details of `flux_kontext_no_resize_control`:
+If you set `no_resize_control`, it disables resizing of the control image. 
 
-When this option is specified, the control image is trimmed to a multiple of 16 pixels and converted to latent and passed to the model. Each element in the batch must have the same resolution, which is adjusted by Aspect Ratio Bucketing (buckets are divided by the resolution of the target image and also the resolution of the control image).
-
-However, since the attention calculation is split, the speed may be reduced.
-
-Also, since FLUX.1 Kontext assumes a fixed [resolution of control images](https://github.com/black-forest-labs/flux/blob/1371b2bc70ac80e1078446308dd5b9a2ebc68c87/src/flux/util.py#L584), it may be better to prepare the control images in advance to match these resolutions.
+Since FLUX.1 Kontext assumes a fixed [resolution of control images](https://github.com/black-forest-labs/flux/blob/1371b2bc70ac80e1078446308dd5b9a2ebc68c87/src/flux/util.py#L584), it may be better to prepare the control images in advance to match these resolutions and use `no_resize_control`.
 
 <details>
 <summary>日本語</summary>
 
 FLUX.1 Kontextのデータセット設定は、制御画像を持つ画像データセットを使用します。ただし、制御画像は1枚しか使用できません。
 
-また、`flux_kontext_no_resize_control`を設定すると、制御画像のリサイズを無効にします。デフォルトでは、制御画像は画像と同じ解像度にリサイズされます。
-
 `fp_1f_*`の設定はFLUX.1 Kontextでは使用しません。またマスクも使用されません。
 
-`flux_kontext_no_resize_control` の技術的詳細：
+また、`no_resize_control`を設定すると、制御画像のリサイズを無効にします。
 
-このオプションを指定すると、制御画像は16ピクセル単位にトリミングされ、latentに変換されてモデルに渡されます。バッチのすべての要素が同じ解像度を持つように調整されます（Aspect Ratio Bucketingにおいて、対象画像の解像度と、さらに制御画像の解像度でバケツが分けられます）。
-
-またFLUX.1 Kontextが前提とする[制御画像の解像度](https://github.com/black-forest-labs/flux/blob/1371b2bc70ac80e1078446308dd5b9a2ebc68c87/src/flux/util.py#L584)は一定のため、あらかじめ制御画像の解像度をこれらに合わせておいた方が良いかもしれません。
+FLUX.1 Kontextは[制御画像の固定解像度](https://github.com/black-forest-labs/flux/blob/1371b2bc70ac80e1078446308dd5b9a2ebc68c87/src/flux/util.py#L584)を想定しているため、これらの解像度にあわせて制御画像を事前に用意し、`no_resize_control`を使用する方が良い場合があります。
 
 </details>
 
@@ -502,27 +599,21 @@ The Qwen-Image-Edit dataset configuration uses an image dataset with control ima
 
 By default, the control image is resized to the same resolution (and aspect ratio) as the image.
 
-If you set `qwen_image_edit_no_resize_control`, it disables resizing of the control image. For example, if the image is 960x544 and the control image is 512x512, the control image will remain 512x512.
+If you set `no_resize_control`, it disables resizing of the control image. For example, if the image is 960x544 and the control image is 512x512, the control image will remain 512x512.
 
-Also, you can specify the resolution of the control image separately from the training image resolution by using `qwen_image_edit_control_resolution`. If you want to resize the control images the same as the official code, specify [1024,1024]. **We strongly recommend specifying this value.**
+Also, you can specify the resolution of the control image separately from the training image resolution by using `control_resolution`. If you want to resize the control images the same as the official code, specify [1024,1024]. **We strongly recommend specifying this value.**
 
-`qwen_image_edit_no_resize_control` cannot be specified together with `qwen_image_edit_control_resolution`.
+`no_resize_control` can be specified together with `control_resolution`.
 
-If `qwen_image_edit_no_resize_control` or `qwen_image_edit_control_resolution` is specified, each control image can have a different resolution. The control image is resized according to the specified settings.
+If `no_resize_control` or `control_resolution` is specified, each control image can have a different resolution. The control image is resized according to the specified settings.
 
 ```toml
 [[datasets]]
-qwen_image_edit_no_resize_control = false # optional, default is false. Disable resizing of control image
-qwen_image_edit_control_resolution = [1024, 1024] # optional, default is None. Specify the resolution of the control image.
+no_resize_control = false # optional, default is false. Disable resizing of control image
+control_resolution = [1024, 1024] # optional, default is None. Specify the resolution of the control image.
 ```
 
 `fp_1f_*` settings are not used in Qwen-Image-Edit.
-
-The technical details of `qwen_image_edit_no_resize_control` is similar to FLUX 1 Kontext.
-
-The technical details of `qwen_image_edit_control_resolution`:
-
-When this option is specified, the control image is resized to a resolution to have the total number of pixels equal to the specified resolution while maintaining the aspect ratio. The official implementation uses 1M pixels, so [1024, 1024] is a common choice.
 
 <details>
 <summary>日本語</summary>
@@ -531,30 +622,46 @@ Qwen-Image-Editのデータセット設定は、制御画像を持つ画像デ�
 
 デフォルトでは、制御画像は画像と同じ解像度（およびアスペクト比）にリサイズされます。
 
-`qwen_image_edit_no_resize_control`を設定すると、制御画像のリサイズを無効にします。たとえば、画像が960x544で制御画像が512x512の場合、制御画像は512x512のままになります。
+`no_resize_control`を設定すると、制御画像のリサイズを無効にします。たとえば、画像が960x544で制御画像が512x512の場合、制御画像は512x512のままになります。
 
-また、`qwen_image_edit_control_resolution`を使用することで、制御画像の解像度を学習画像の解像度と異なる値に指定できます。公式のコードと同じように制御画像をリサイズしたい場合は、[1024, 1024]を指定してください。**この値の指定を強く推奨します。**
+また、`control_resolution`を使用することで、制御画像の解像度を学習画像の解像度と異なる値に指定できます。公式のコードと同じように制御画像をリサイズしたい場合は、[1024, 1024]を指定してください。**この値の指定を強く推奨します。**
 
-`qwen_image_edit_no_resize_control`と `qwen_image_edit_control_resolution`は同時に指定できません。
+`no_resize_control`と `control_resolution`は同時に指定できます。
 
-`qwen_image_edit_no_resize_control`または`qwen_image_edit_control_resolution`が指定された場合、各制御画像は異なる解像度を持つことができます。制御画像は指定された設定に従ってリサイズされます。
+`no_resize_control`または`control_resolution`が指定された場合、各制御画像は異なる解像度を持つことができます。制御画像は指定された設定に従ってリサイズされます。
 
 ```toml
 [[datasets]]
-qwen_image_edit_no_resize_control = false # オプション、デフォルトはfalse。制御画像のリサイズを無効にします
-qwen_image_edit_control_resolution = [1024, 1024] # オプション、デフォルトはNone。制御画像の解像度を指定します
+no_resize_control = false # オプション、デフォルトはfalse。制御画像のリサイズを無効にします
+control_resolution = [1024, 1024] # オプション、デフォルトはNone。制御画像の解像度を指定します
 ```
 
 `fp_1f_*`の設定はQwen-Image-Editでは使用しません。
 
-`qwen_image_edit_no_resize_control` の技術的詳細はFLUX 1 Kontextと同様です。
-
-`qwen_image_edit_control_resolution` の技術的詳細：
-
-このオプションを指定すると、制御画像は、アスペクト比を維持したまま、指定された解像度と同じピクセル数のサイズにリサイズされます。公式の実装では1Mピクセルが使用されるため、[1024, 1024]を指定すると良いでしょう。
-
 </details>
 
+### FLUX.2
+
+The FLUX.2 dataset configuration uses an image dataset with control images (it can also be trained without control images). Multiple control images can be used.
+
+`fp_1f_*` settings are not used in FLUX.2.
+
+If you set `no_resize_control`, it disables resizing of the control images. If you want to follow the official FLUX.2 inference settings, please specify this option.
+
+You can specify the resolution of the control images separately from the training image resolution by using `control_resolution`. If you want to follow the official FLUX.2 inference settings, specify [2024, 2024] (note that it is not 2048) when there is one control image, and [1024, 1024] when there are multiple control images, together with the `no_resize_control` option.
+
+<details>
+<summary>日本語</summary>
+
+FLUX.2のデータセット設定は、制御画像を持つ画像データセットを使用します（制御画像なしでも学習できます）。複数枚の制御画像が使用可能です。
+
+`fp_1f_*`の設定はFLUX.2では使用しません。
+
+`no_resize_control`を設定すると、制御画像のリサイズを無効にします。FLUX.2公式の推論時設定に準拠する場合は、このオプションを指定してください。
+
+`control_resolution`を使用して、制御画像の解像度を学習画像の解像度と異なる値に指定できます。FLUX.2公式の推論時設定に準拠する場合は、`no_resize_control`オプションと同時に、制御画像が1枚の場合は`[2024, 2024]`（2048ではないので注意）、制御画像が複数の場合は`[1024, 1024]`を指定してください。
+
+</details>
 
 ## Specifications
 

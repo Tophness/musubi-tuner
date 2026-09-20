@@ -16,6 +16,11 @@ except ImportError:
     flash_attn_func = None
 
 try:
+    import flash_attn_interface  # FlashAttention 3 (Hopper)
+except ImportError:
+    flash_attn_interface = None
+
+try:
     from sageattention import sageattn_varlen, sageattn
 except ImportError:
     sageattn_varlen = None
@@ -36,6 +41,10 @@ class AttentionParams:
     seqlens: Optional[torch.Tensor] = None
     cu_seqlens: Optional[torch.Tensor] = None
     max_seqlen: Optional[int] = None
+
+    def __post_init__(self):
+        if self.attn_mode == "sdpa":
+            self.attn_mode = "torch"
 
     @staticmethod
     def create_attention_params(attn_mode: Optional[str], split_attn: bool) -> "AttentionParams":
@@ -79,6 +88,11 @@ class AttentionParams:
             return AttentionParams(attn_mode, split_attn, img_len, attention_mask, seqlens, cu_seqlens, max_seqlen)
 
 
+def _flash3_output(result):
+    # older FlashAttention 3 releases return (out, softmax_lse); newer ones return out only
+    return result[0] if isinstance(result, tuple) else result
+
+
 def attention(
     qkv_or_q: Union[torch.Tensor, list],
     k: Optional[torch.Tensor] = None,
@@ -113,6 +127,14 @@ def attention(
         assert k is not None and v is not None, "k and v must be provided if qkv_or_q is a tensor"
     if attn_params is None:
         attn_params = AttentionParams.create_attention_params("torch", False)
+
+    # GQA: q may carry more heads than k/v (e.g. Krea 2 = 48 query / 12 kv heads). flash and
+    # sageattn group heads natively inside the kernel (verified), so they ignore this. For the
+    # torch (SDPA) path we expand k/v to q's head count below instead of passing enable_gqa=True,
+    # because enable_gqa forces SDPA onto the slow math kernel (~7x slower than the fused kernels
+    # at K2 scale); the repeat is numerically identical. Revert to enable_gqa=True once PyTorch's
+    # fused (flash / mem-efficient) kernels gain native GQA support. (q/k/v here are [B, L, H, D].)
+    enable_gqa = q.shape[-2] != k.shape[-2]
 
     # If split attn is False, attention mask is provided and all sequence lengths are same, we can trim the sequence
     seqlen_trimmed = False
@@ -164,33 +186,51 @@ def attention(
         if attn_params.split_attn:
             x = []
             for i in range(len(q)):
-                x_i = torch.nn.functional.scaled_dot_product_attention(q[i], k[i], v[i], dropout_p=drop_rate)
+                qi, ki, vi = q[i], k[i], v[i]
+                if enable_gqa:  # expand k/v heads to avoid SDPA's slow enable_gqa math path
+                    g = qi.shape[1] // ki.shape[1]  # [B, H, L, D] -> heads at dim 1
+                    ki = ki.repeat_interleave(g, dim=1)
+                    vi = vi.repeat_interleave(g, dim=1)
+                x_i = torch.nn.functional.scaled_dot_product_attention(qi, ki, vi, dropout_p=drop_rate)
                 q[i] = None
                 k[i] = None
                 v[i] = None
                 x.append(pad_fn(x_i, attn_params.max_seqlen))  # B, H, L, D
             x = torch.cat(x, dim=0)
-            del q, k, v
+            q, k, v = None, None, None
 
         else:
+            if enable_gqa:  # expand k/v heads to avoid SDPA's slow enable_gqa math path
+                g = q.shape[1] // k.shape[1]  # [B, H, L, D] -> heads at dim 1
+                k = k.repeat_interleave(g, dim=1)
+                v = v.repeat_interleave(g, dim=1)
             x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_params.attention_mask, dropout_p=drop_rate)
-            del q, k, v
+            q, k, v = None, None, None
 
     elif attn_params.attn_mode == "xformers":
         if attn_params.split_attn:
             x = []
             for i in range(len(q)):
-                x_i = xops.memory_efficient_attention(q[i], k[i], v[i], p=drop_rate)
+                qi, ki, vi = q[i], k[i], v[i]
+                if enable_gqa:  # expand k/v heads to q's count; xformers 4D has no native GQA ([B, L, H, D] -> dim 2)
+                    g = qi.shape[2] // ki.shape[2]
+                    ki = ki.repeat_interleave(g, dim=2)
+                    vi = vi.repeat_interleave(g, dim=2)
+                x_i = xops.memory_efficient_attention(qi, ki, vi, p=drop_rate)
                 q[i] = None
                 k[i] = None
                 v[i] = None
                 x.append(pad_fn(x_i, attn_params.max_seqlen))  # B, L, H, D
             x = torch.cat(x, dim=0)
-            del q, k, v
+            q, k, v = None, None, None
 
         else:
+            if enable_gqa:  # expand k/v heads to q's count; xformers 4D has no native GQA ([B, L, H, D] -> dim 2)
+                g = q.shape[2] // k.shape[2]
+                k = k.repeat_interleave(g, dim=2)
+                v = v.repeat_interleave(g, dim=2)
             x = xops.memory_efficient_attention(q, k, v, attn_bias=attn_params.attention_mask, p=drop_rate)
-            del q, k, v
+            q, k, v = None, None, None
 
     elif attn_params.attn_mode == "sageattn":
         if attn_params.split_attn:
@@ -203,22 +243,24 @@ def attention(
                 v[i] = None
                 x.append(pad_fn(x_i, attn_params.max_seqlen))  # B, H, L, D
             x = torch.cat(x, dim=0)
-            del q, k, v
+            q, k, v = None, None, None
         elif attn_params.cu_seqlens is None:  # all tokens are valid
             x = sageattn(q, k, v)  # B, L, H, D. No dropout support
-            del q, k, v
+            q, k, v = None, None, None
         else:
             # Reshape to [(bxs), a, d]
             batch_size, seqlen = q.shape[0], q.shape[1]
-            q = q.view(q.shape[0] * q.shape[1], *q.shape[2:])  # [B*L, H, D]
-            k = k.view(k.shape[0] * k.shape[1], *k.shape[2:])  # [B*L, H, D]
-            v = v.view(v.shape[0] * v.shape[1], *v.shape[2:])  # [B*L, H, D]
+            # reshape (not view): callers may pass non-contiguous q/k/v (e.g. Krea 2 transposes
+            # [B,H,L,D]->[B,L,H,D] after RoPE); reshape copies only when needed, view-equivalent otherwise.
+            q = q.reshape(q.shape[0] * q.shape[1], *q.shape[2:])  # [B*L, H, D]
+            k = k.reshape(k.shape[0] * k.shape[1], *k.shape[2:])  # [B*L, H, D]
+            v = v.reshape(v.shape[0] * v.shape[1], *v.shape[2:])  # [B*L, H, D]
 
             # Assume cu_seqlens_q == cu_seqlens_kv and max_seqlen_q == max_seqlen_kv. No dropout support
             x = sageattn_varlen(
                 q, k, v, attn_params.cu_seqlens, attn_params.cu_seqlens, attn_params.max_seqlen, attn_params.max_seqlen
             )
-            del q, k, v
+            q, k, v = None, None, None
 
             # Reshape x with shape [(bxs), a, d] to [b, s, a, d]
             x = x.view(batch_size, seqlen, x.shape[-2], x.shape[-1])  # B, L, H, D
@@ -234,28 +276,70 @@ def attention(
                 v[i] = None
                 x.append(pad_fn(x_i, attn_params.max_seqlen))  # B, L, H, D
             x = torch.cat(x, dim=0)
-            del q, k, v
+            q, k, v = None, None, None
         elif attn_params.cu_seqlens is None:  # all tokens are valid
             x = flash_attn_func(q, k, v, drop_rate)  # B, L, H, D
-            del q, k, v
+            q, k, v = None, None, None
         else:
             # Reshape to [(bxs), a, d]
             batch_size, seqlen = q.shape[0], q.shape[1]
-            q = q.view(q.shape[0] * q.shape[1], *q.shape[2:])  # [B*L, H, D]
-            k = k.view(k.shape[0] * k.shape[1], *k.shape[2:])  # [B*L, H, D]
-            v = v.view(v.shape[0] * v.shape[1], *v.shape[2:])  # [B*L, H, D]
+            # reshape (not view): callers may pass non-contiguous q/k/v (e.g. Krea 2 transposes
+            # [B,H,L,D]->[B,L,H,D] after RoPE); reshape copies only when needed, view-equivalent otherwise.
+            q = q.reshape(q.shape[0] * q.shape[1], *q.shape[2:])  # [B*L, H, D]
+            k = k.reshape(k.shape[0] * k.shape[1], *k.shape[2:])  # [B*L, H, D]
+            v = v.reshape(v.shape[0] * v.shape[1], *v.shape[2:])  # [B*L, H, D]
 
             # Assume cu_seqlens_q == cu_seqlens_kv and max_seqlen_q == max_seqlen_kv
             x = flash_attn_varlen_func(
                 q, k, v, attn_params.cu_seqlens, attn_params.cu_seqlens, attn_params.max_seqlen, attn_params.max_seqlen, drop_rate
             )
-            del q, k, v
+            q, k, v = None, None, None
+
+            # Reshape x with shape [(bxs), a, d] to [b, s, a, d]
+            x = x.view(batch_size, seqlen, x.shape[-2], x.shape[-1])  # B, L, H, D
+
+    elif attn_params.attn_mode == "flash3":
+        # FlashAttention 3 groups GQA heads in the kernel like flash; it has no dropout support
+        if flash_attn_interface is None:
+            raise RuntimeError("FlashAttention 3 was selected but flash_attn_interface is not installed")
+        if attn_params.split_attn:
+            x = []
+            for i in range(len(q)):
+                x_i = _flash3_output(flash_attn_interface.flash_attn_func(q[i], k[i], v[i]))  # B, L, H, D
+                q[i] = None
+                k[i] = None
+                v[i] = None
+                x.append(pad_fn(x_i, attn_params.max_seqlen))  # B, L, H, D
+            x = torch.cat(x, dim=0)
+            q, k, v = None, None, None
+        elif attn_params.cu_seqlens is None:  # all tokens are valid
+            x = _flash3_output(flash_attn_interface.flash_attn_func(q, k, v))  # B, L, H, D
+            q, k, v = None, None, None
+        else:
+            # Reshape to [(bxs), a, d]
+            batch_size, seqlen = q.shape[0], q.shape[1]
+            q = q.reshape(q.shape[0] * q.shape[1], *q.shape[2:])  # [B*L, H, D]
+            k = k.reshape(k.shape[0] * k.shape[1], *k.shape[2:])  # [B*L, H, D]
+            v = v.reshape(v.shape[0] * v.shape[1], *v.shape[2:])  # [B*L, H, D]
+
+            # Assume cu_seqlens_q == cu_seqlens_kv and max_seqlen_q == max_seqlen_kv
+            x = _flash3_output(
+                flash_attn_interface.flash_attn_varlen_func(
+                    q,
+                    k,
+                    v,
+                    cu_seqlens_q=attn_params.cu_seqlens,
+                    cu_seqlens_k=attn_params.cu_seqlens,
+                    max_seqlen_q=attn_params.max_seqlen,
+                    max_seqlen_k=attn_params.max_seqlen,
+                )
+            )
+            q, k, v = None, None, None
 
             # Reshape x with shape [(bxs), a, d] to [b, s, a, d]
             x = x.view(batch_size, seqlen, x.shape[-2], x.shape[-1])  # B, L, H, D
 
     else:
-        # Currently only PyTorch SDPA and xformers are implemented
         raise ValueError(f"Unsupported attention mode: {attn_params.attn_mode}")
 
     x = transpose_fn(x)  # [B, L, H, D]

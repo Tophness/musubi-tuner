@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+from functools import lru_cache
 from io import BytesIO
 from typing import Any, Callable, Optional
 import logging
@@ -154,6 +155,38 @@ def str_to_dtype(s: Optional[str], default_dtype: Optional[torch.dtype] = None) 
         raise ValueError(f"Unsupported dtype: {s}")
 
 
+@lru_cache(maxsize=1)
+def _known_dtype_strs() -> tuple[str, ...]:
+    """All dtype strings dtype_to_str() can emit, longest first.
+
+    Sorting by length keeps multi-underscore names (e.g. "float8_e4m3fn") ahead of their
+    prefixes ("float8...") so the longest matching suffix wins.
+    """
+    names = set()
+    for attr in dir(torch):
+        try:
+            obj = getattr(torch, attr)
+        except Exception:
+            continue
+        if isinstance(obj, torch.dtype):
+            names.add(dtype_to_str(obj))
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def remove_dtype_suffix(name: str) -> str:
+    """Remove a trailing ``_<dtype>`` suffix (as written by dtype_to_str) from a cache key.
+
+    Robust to dtype names that contain underscores such as ``float8_e4m3fn``; a plain
+    ``rsplit("_", 1)`` would only drop the final ``fn`` segment. Returns ``name`` unchanged
+    if it does not end with a known dtype suffix.
+    """
+    for dtype_str in _known_dtype_strs():
+        suffix = "_" + dtype_str
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def to_device(x: Any, device: torch.device) -> Any:
     if isinstance(x, torch.Tensor):
         return x.to(device)
@@ -224,6 +257,53 @@ def disable_linear_from_compile(module: torch.nn.Module):
                 sub_module._forward_before_disable_compile = sub_module.forward
                 sub_module._eager_forward = torch._dynamo.disable()(sub_module.forward)
             sub_module.forward = sub_module._eager_forward  # override forward to disable compile
+
+
+def setup_parser_compile(parser: argparse.ArgumentParser) -> None:
+    """Add the torch.compile argument set consumed by compile_transformer below.
+
+    Same arguments as hv_generate_video.setup_parser_compile and the compile slice of
+    training's parser_common, placed here so scripts can add them without importing an
+    architecture module or the training-only dynamo/tf32 arguments.
+    """
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="Enable torch.compile (requires Triton) / torch.compileを有効にする（Tritonが必要）",
+    )
+    parser.add_argument(
+        "--compile_backend",
+        type=str,
+        default="inductor",
+        help="torch.compile backend (default: inductor) / torch.compileのバックエンド（デフォルト: inductor）",
+    )
+    parser.add_argument(
+        "--compile_mode",
+        type=str,
+        default="default",
+        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"],
+        help="torch.compile mode (default: default) / torch.compileのモード（デフォルト: default）",
+    )
+    parser.add_argument(
+        "--compile_dynamic",
+        type=str,
+        default=None,
+        choices=["true", "false", "auto"],
+        help="Dynamic shapes mode for torch.compile (default: None, same as auto)"
+        " / torch.compileの動的形状モード（デフォルト: None、autoと同じ動作）",
+    )
+    parser.add_argument(
+        "--compile_fullgraph",
+        action="store_true",
+        help="Enable fullgraph mode in torch.compile / torch.compileでフルグラフモードを有効にする",
+    )
+    parser.add_argument(
+        "--compile_cache_size_limit",
+        type=int,
+        default=None,
+        help="Set torch._dynamo.config.cache_size_limit (default: PyTorch default, typically 8-32)"
+        " / torch._dynamo.config.cache_size_limitを設定（デフォルト: PyTorchのデフォルト、通常8-32）",
+    )
 
 
 def compile_transformer(

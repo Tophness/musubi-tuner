@@ -41,9 +41,9 @@
 
 ## Introduction
 
-This repository provides scripts for training LoRA (Low-Rank Adaptation) models with HunyuanVideo, Wan2.1/2.2, FramePack, FLUX.1 Kontext, and Qwen-Image architectures. 
+This repository provides scripts for training LoRA (Low-Rank Adaptation) models with HunyuanVideo, Wan2.1/2.2, FramePack, FLUX.1 Kontext, FLUX.2 dev/klein, Qwen-Image, Z-Image, and MiniMax-H3 architectures.
 
-This repository is unofficial and not affiliated with the official HunyuanVideo/Wan2.1/2.2/FramePack/FLUX.1 Kontext/Qwen-Image repositories.
+This repository is unofficial and not affiliated with the official repositories of these architectures.
 
 *This repository is under development.*
 
@@ -63,36 +63,25 @@ If you find this project helpful, please consider supporting its development via
 
 GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
-- December 27, 2025
-    - Added support for Qwen-Image-Edit-2511. See [PR #808](https://github.com/kohya-ss/musubi-tuner/pull/808).
-        - Please refer to the [documentation](./docs/qwen_image.md) for details such as checkpoints and options.
-        - In the caching, training, and inference scripts, specify `--model_version` option as `edit-2511`.
+- September 16, 2026
+    - Added experimental support for MiniMax-H3 (LoRA training and joint video/audio generation). Many thanks to sdbds for the initial [PR #1018](https://github.com/kohya-ss/musubi-tuner/pull/1018) and follow-ups.
+        - For details, please refer to the [documentation](./docs/minimax_h3.md) and the [one-frame (image) training documentation](./docs/minimax_h3_1f.md). The list of merged features and remaining work is tracked in the [MiniMax-H3 support roadmap](https://github.com/kohya-ss/musubi-tuner/issues/1029).
+    - Added ConvRot int8 quantization of the frozen DiT base weights for Krea 2 LoRA training (`--convrot_int8`), as an alternative to `--fp8_base --fp8_scaled`. See [PR #1008](https://github.com/kohya-ss/musubi-tuner/pull/1008).
+        - Weight VRAM is halved as with fp8. The main benefit is speed on GPUs without fp8 support (RTX 30 series and older). Requires `triton` for the fused kernels. See the [Krea 2 documentation](./docs/krea2.md#convrot-int8--convrot-int8) for details.
+    - Dataset configuration changes for metadata JSONL files. See the [dataset configuration documentation](./docs/dataset_config.md) for details.
+        - Relative paths in JSONL files are now also resolved against the directory containing the JSONL file when they are not found relative to the working directory. [PR #1023](https://github.com/kohya-ss/musubi-tuner/pull/1023)
+        - Video records may carry an optional `audio_path` field for audio-capable architectures (currently MiniMax-H3); a same-stem audio sidecar file or the embedded audio track is used when omitted. [PR #1020](https://github.com/kohya-ss/musubi-tuner/pull/1020), [PR #1021](https://github.com/kohya-ss/musubi-tuner/pull/1021)
+        - Keys outside the shared schema are passed through to architecture-specific cache scripts as per-item extras. [PR #1094](https://github.com/kohya-ss/musubi-tuner/pull/1094)
+    - Fixed `--attn_mode sdpa` raising an error in the shared attention backends; it is now an alias of `torch`. Thank you rossnot [PR #1092](https://github.com/kohya-ss/musubi-tuner/pull/1092).
+    - Fixed video datasets ignoring `enable_bucket` and `bucket_no_upscale` when caching latents; the video caching path always bucketed regardless of the setting. Thank you christopher5106 [PR #1100](https://github.com/kohya-ss/musubi-tuner/pull/1100).
+        - **Behavior change:** video datasets without `enable_bucket = true` are now cached at the single configured `resolution` (resized and center-cropped), as image datasets always were. If you relied on bucketing without setting it, add `enable_bucket = true` to the dataset. Otherwise, re-run latent caching (and text encoder output caching for MiniMax-H3 `fl2va` / `ref2va`, whose caches embed the resized control images) so the caches match the configured resolution.
+    - Training scripts now stop at startup when `--output_dir` or `--output_name` is missing, instead of failing at the first save. Thank you rossnot [PR #1070](https://github.com/kohya-ss/musubi-tuner/pull/1070).
+    - Krea 2: `--gradient_checkpointing_cpu_offload` is now honored (activation CPU offloading during gradient checkpointing). Thank you rockerBOO [PR #1101](https://github.com/kohya-ss/musubi-tuner/pull/1101).
+    - Krea 2: Added `--turbo_lora` to compose a Turbo LoRA on top of the RAW model for sample generation during training, as an alternative to `--turbo_dit`. It can be combined with block swap, fp8 and ConvRot int8. See the [Krea 2 documentation](./docs/krea2.md#sample-image-generation-during-training--学習中のサンプル画像生成) for details. Thank you rockerBOO [PR #1103](https://github.com/kohya-ss/musubi-tuner/pull/1103).
 
-- December 25, 2025
-    - Added support for LoRA training of Kandinsky 5. See [PR #774](https://github.com/kohya-ss/musubi-tuner/pull/774). Many thanks to AkaneTendo25 for this contribution.
-        - Please refer to the [documentation](./docs/kandinsky5.md) for details.
-        - **Note that some weight specifications are in Hugging Face ID format. We plan to change to direct *.safetensors specification like other models soon, so please be aware.**
-
-- December 13, 2025
-    - Added support for finetuning Qwen-Image. See [PR #778](https://github.com/kohya-ss/musubi-tuner/pull/778). Many thanks to sdbds for this contribution.
-        - Please refer to the [documentation](./docs/zimage.md#finetuning) for details.
-    - Added a very simple GUI tool. See [PR #779](https://github.com/kohya-ss/musubi-tuner/pull/779).
-        - Currently supports LoRA training for Z-Image-Turbo and Qwen-Image. Please refer to the [documentation](./src/musubi_tuner/gui/gui.md) for details.
-
-- December 9, 2025
-    - LoRA weights in Diffusers format can now be loaded with the `--base_weights` option in training scripts. See [PR #772](https://github.com/kohya-ss/musubi-tuner/pull/772).
-        - This allows training using Z-Image-Turbo's Training Adapter, etc.
-    - Updated the [documentation](./docs/zimage.md) on how to perform LoRA training for Z-Image-Turbo using De-Turbo models or Training Adapters.
-    - We would like to express our deep gratitude to ostris for providing these.
-
-- December 7, 2025
-    - Added support for Z-Image Turbo. See [PR #757](https://github.com/kohya-ss/musubi-tuner/pull/757).
-        - Since this is a Turbo (distilled) model, training may be unstable. Feedback is welcome.
-        - Please refer to the [documentation](./docs/zimage.md) for details.
-
-- December 5, 2025
-    - Added support for HunyuanVideo 1.5. See [PR #748](https://github.com/kohya-ss/musubi-tuner/pull/748).
-        - LoRA training for T2V and I2V is now supported. Please refer to the [documentation](./docs/hunyuan_video_1_5.md) for details.
+- July 14, 2026
+    - Added the `--log_grad_metrics` option to log gradient norm diagnostics (`grad/norm`, `grad/mean_norm`, `grad/max`, measured before gradient clipping) to the tracker. Thank you rockerBOO [PR #988](https://github.com/kohya-ss/musubi-tuner/pull/988).
+        - Useful for diagnosing gradient explosion / vanishing and for choosing an appropriate `--max_grad_norm` value. Disabled by default. See the [advanced configuration documentation](./docs/advanced_config.md#log-gradient-metrics--勾配メトリクスのログ出力) for details.
 
 ### Releases
 
@@ -153,11 +142,19 @@ For detailed information on specific architectures, configurations, and advanced
 - [FramePack (Single Frame)](./docs/framepack_1f.md)
 - [FLUX.1 Kontext](./docs/flux_kontext.md)
 - [Qwen-Image](./docs/qwen_image.md)
+- [Z-Image](./docs/zimage.md)
+- [HiDream-O1-Image](./docs/hidream_o1.md)
+- [HunyuanVideo 1.5](./docs/hunyuan_video_1_5.md)
+- [Kandinsky 5](./docs/kandinsky5.md)
+- [FLUX.2](./docs/flux_2.md)
+- [MiniMax-H3](./docs/minimax_h3.md)
+- [MiniMax-H3 (Single Frame)](./docs/minimax_h3_1f.md)
 
 **Common Configuration & Usage:**
 - [Dataset Configuration](./docs/dataset_config.md)
 - [Advanced Configuration](./docs/advanced_config.md)
 - [Sampling during Training](./docs/sampling_during_training.md)
+- [Block Swap (CPU Offloading for Memory Saving)](./docs/block_swap.md)
 - [Tools and Utilities](./docs/tools.md)
 - [Using torch.compile](./docs/torch_compile.md)
 
@@ -313,5 +310,7 @@ Code under the `hunyuan_video_1_5` directory is modified from [HunyuanVideo 1.5]
 Code under the `wan` directory is modified from [Wan2.1](https://github.com/Wan-Video/Wan2.1). The license is under the Apache License 2.0.
 
 Code under the `frame_pack` directory is modified from [FramePack](https://github.com/lllyasviel/FramePack). The license is under the Apache License 2.0.
+
+Code in `modules/convrot_int8_kernels.py` is modified from [comfy-kitchen](https://github.com/Comfy-Org/comfy-kitchen) (in turn derived from dxqb/OneTrainer and ComfyUI-Flux2-INT8). The license is under the Apache License 2.0.
 
 Other code is under the Apache License 2.0. Some code is copied and modified from Diffusers.
